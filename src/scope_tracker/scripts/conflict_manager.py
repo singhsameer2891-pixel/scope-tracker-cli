@@ -28,6 +28,14 @@ from scope_tracker.scripts.slack_client import (
     load_slack_credentials,
     resolve_channel_id,
 )
+from scope_tracker.scripts.sheet_manager import (
+    build_headers,
+    load_config as sm_load_config,
+    read_sheet,
+    _extract_spreadsheet_id,
+    _get_google_creds,
+)
+from scope_tracker.scripts.google_sheets import update_spreadsheet as gs_update_spreadsheet
 
 
 # IST timezone
@@ -80,6 +88,85 @@ def _load_config(config_path: str, project_name: str) -> tuple[dict, dict]:
 
     _log(f"Project '{project_name}' not found in config.")
     sys.exit(1)
+
+
+def _apply_resolution_to_sheet(
+    config: dict,
+    project_config: dict,
+    base_dir: str,
+    conflict_id: str,
+    resolved_value: str,
+    resolution_entry: str,
+) -> None:
+    """Apply a conflict resolution directly to the Google Sheet.
+
+    Finds the row matching the conflict's source_id and updates the
+    Scope Decision and Conflict Resolution columns.
+
+    Args:
+        config: Full config dict.
+        project_config: Project-specific config dict.
+        base_dir: Base scope-tracker directory.
+        conflict_id: The conflict's source ID (e.g. "SLACK:123456").
+        resolved_value: The resolved scope decision value.
+        resolution_entry: Human-readable resolution string for the sheet.
+    """
+    sheet_url = project_config.get("sheet_url", "")
+    if not sheet_url:
+        _log("No sheet URL configured — cannot apply resolution to sheet.")
+        return
+
+    headers = build_headers(config)
+    sheet_rows = read_sheet(config, base_dir, sheet_url, headers)
+
+    # Find the row matching this conflict's source_id
+    target_row_idx = None
+    for i, row in enumerate(sheet_rows):
+        source_id = row.get("Source ID", "")
+        # Source ID may contain multiple IDs comma-separated
+        if conflict_id in source_id:
+            target_row_idx = i
+            break
+
+    if target_row_idx is None:
+        _log(f"Could not find row with Source ID containing '{conflict_id}' in sheet.")
+        return
+
+    # Build changes: update Scope Decision and Conflict Resolution columns
+    changes = [
+        {
+            "type": "update",
+            "row_index": target_row_idx + 2,  # 1-indexed + header row
+            "changes": {
+                "Scope Decision": resolved_value,
+                "Conflict Resolution": resolution_entry,
+            },
+        }
+    ]
+
+    spreadsheet_id = _extract_spreadsheet_id(sheet_url)
+    creds = _get_google_creds(config, base_dir)
+
+    from scope_tracker.scripts.sheet_manager import (
+        _build_formatting_spec,
+        _build_dropdown_spec,
+        _build_conditional_formatting_spec,
+    )
+
+    formatting_spec = _build_formatting_spec(headers, config)
+    dropdown_spec = _build_dropdown_spec(headers, config)
+    cond_format_spec = _build_conditional_formatting_spec(headers)
+
+    gs_update_spreadsheet(
+        creds=creds,
+        spreadsheet_id=spreadsheet_id,
+        changes=changes,
+        headers=headers,
+        formatting=formatting_spec,
+        dropdowns=dropdown_spec,
+        conditional_formatting=cond_format_spec,
+    )
+    _log(f"Sheet updated: row {target_row_idx + 2} → Scope Decision = {resolved_value}")
 
 
 def run(project_dir: str, config_path: str, project_name: str) -> dict:
@@ -214,21 +301,14 @@ def run(project_dir: str, config_path: str, project_name: str) -> dict:
         conflict["resolved_at"] = datetime.now(IST).isoformat()
         conflict["resolution"] = resolution_entry
 
-        # Prepare sheet updates (the actual sheet write will happen via sheet_manager
-        # or the pipeline will handle it). Store the resolution for the pipeline to apply.
-        state_updates_path = os.path.join(
-            system_dir, f"{project_name}_state_updates.json"
-        )
-        state_updates = _load_json(state_updates_path) if os.path.exists(state_updates_path) else {}
-        if "conflict_resolutions" not in state_updates:
-            state_updates["conflict_resolutions"] = []
-        state_updates["conflict_resolutions"].append({
-            "conflict_id": conflict_id,
-            "resolved_value": resolved_value,
-            "resolution_entry": resolution_entry,
-        })
-        with open(state_updates_path, "w", encoding="utf-8") as f:
-            json.dump(state_updates, f, indent=2)
+        # Apply resolution directly to Google Sheet
+        try:
+            _apply_resolution_to_sheet(
+                config, project_config, base_dir,
+                conflict_id, resolved_value, resolution_entry,
+            )
+        except Exception as e:
+            _log(f"Conflict {conflict_id}: warning — could not update sheet: {e}")
 
         resolved_count += 1
         _log(f"Conflict {conflict_id}: resolved → {resolved_value}")
