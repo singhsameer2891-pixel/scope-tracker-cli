@@ -1072,3 +1072,138 @@ it finds a conflict, how to reply, and that it will be picked up automatically.
 | 2026-03-19 | PRD/Slack read gated on modifiedTime/watermark check | Performance, avoid redundant reads |
 | 2026-03-19 | Conflict resolution flow via Slack thread reply | User resolves in context, not in a config file |
 | 2026-03-19 | `pyproject.toml` build-backend changed from `setuptools.backends.legacy:build` to `setuptools.build_meta` | Original value is not a valid setuptools backend |
+| 2026-03-20 | Replaced `@modelcontextprotocol/server-confluence` with `@aashari/mcp-server-atlassian-confluence` in `.mcp.json` | Old package does not exist on npm. New package uses env vars: `ATLASSIAN_SITE_NAME`, `ATLASSIAN_USER_EMAIL`, `ATLASSIAN_API_TOKEN` |
+| 2026-03-20 | LLM usage restricted to semantic-only tasks. All deterministic operations moved to direct Python API calls. See Section 14 below. | LLM as middleman for data fetching is slow, unreliable (exits 0 but doesn't write files), expensive (burns tokens for a requests.get), and non-deterministic |
+
+---
+
+## 14. Direct API Integration (replaces LLM-as-middleman)
+
+### 14.1 Principle
+
+The LLM (`claude -p`) must **only** be used for tasks requiring semantic understanding of natural language:
+- **Slack classification** (`slack_classify.md`) — interpreting whether a conversation contains a scope decision
+- **Semantic matching** (`slack_match.md`) — fuzzy matching a Slack item to existing sheet rows
+- **Conflict resolution** (`conflict_resolve.md`) — interpreting free-form human replies
+
+Everything else must use direct Python API calls. No LLM for data fetching, file writing, parsing, or formatting.
+
+### 14.2 Google Sheets — Direct API
+
+Replace all LLM-based sheet operations (create, read, update) with `google-api-python-client`.
+
+**Auth flow:**
+- OAuth2 "installed app" flow using a `client_secret.json` file
+- First run: opens browser for consent → saves `token.json` to scope-tracker directory
+- Subsequent runs: uses saved refresh token
+- Scopes: `https://www.googleapis.com/auth/spreadsheets`
+- New dependency: `google-auth-oauthlib`
+
+**New module:** `src/scope_tracker/scripts/google_sheets.py`
+- `get_sheets_service(client_secret_path, token_path)` → authenticated Sheets API service
+- `create_spreadsheet(service, title, headers, rows, formatting_spec)` → `{"sheet_url": "...", "spreadsheet_id": "..."}`
+- `read_spreadsheet(service, spreadsheet_id, headers)` → list of row dicts
+- `update_spreadsheet(service, spreadsheet_id, changes, headers)` → applies batch updates
+- `apply_formatting(service, spreadsheet_id, formatting_spec)` → column widths, band colors, frozen rows, borders, text wrapping
+- `apply_dropdowns(service, spreadsheet_id, dropdown_spec)` → data validation rules
+- `apply_conditional_formatting(service, spreadsheet_id, cond_format_spec)` → color rules
+
+**Config changes:**
+- `scope_tracker_config.json` gains `google_sheets.client_secret_path` field (set during `init`)
+- Token stored at `{scope-tracker-dir}/token.json` (added to `.gitignore`)
+
+**sheet_manager.py changes:**
+- Remove `from scope_tracker.scripts.call_llm import call_llm`
+- Import `google_sheets` module instead
+- `create_sheet()` calls `google_sheets.create_spreadsheet()` directly
+- `read_sheet()` calls `google_sheets.read_spreadsheet()` directly
+- `update_sheet()` calls `google_sheets.update_spreadsheet()` directly
+- Delete prompt references: `sheet_create.md`, `sheet_update.md`, `sheet_read.md` (never existed anyway)
+
+### 14.3 Confluence — Direct REST API
+
+Replace `call_llm(prd_fetch_meta.md)` and `call_llm(prd_fetch_content.md)` for Confluence sources with direct REST API calls using `requests`.
+
+**New module:** `src/scope_tracker/scripts/confluence_client.py`
+- `get_page_id_from_url(url)` → extracts page ID from Confluence URL
+- `fetch_page_metadata(site_name, email, api_token, page_id)` → `{"modified_time": "ISO8601"}`
+- `fetch_page_content(site_name, email, api_token, page_id)` → plain text (HTML stripped)
+- `fetch_page_comments(site_name, email, api_token, page_id)` → list of `{"anchor_text", "author", "date", "comment_text"}`
+
+**Credentials:** Read from `.mcp.json` (`ATLASSIAN_SITE_NAME`, `ATLASSIAN_USER_EMAIL`, `ATLASSIAN_API_TOKEN`).
+
+**API endpoints:**
+- Metadata: `GET /wiki/api/v2/pages/{id}?include=version`
+- Content: `GET /wiki/api/v2/pages/{id}?include=body.storage` → strip HTML to plain text
+- Comments: `GET /wiki/api/v2/pages/{id}/inline-comments` (or v1 equivalent)
+
+**diff_prd.py changes (Confluence path only):**
+- If `source_type == "confluence"`: call `confluence_client` functions directly
+- Write `_prd_meta.json`, `_prd_raw.txt`, `_prd_comments_raw.json` from Python
+- No `call_llm` for Confluence fetching
+- Google Drive path still uses `call_llm` (until GDrive client is built — out of scope for now)
+
+### 14.4 Slack — Direct API
+
+Replace `call_llm(slack_fetch.md)` with direct Slack Web API calls using `requests` (or `slack_sdk`).
+
+**New module:** `src/scope_tracker/scripts/slack_client.py`
+- `fetch_channel_history(bot_token, channel_id, oldest_ts)` → list of messages after timestamp
+- `fetch_thread_replies(bot_token, channel_id, thread_ts)` → list of replies in a thread
+- `resolve_channel_id(bot_token, channel_name)` → channel ID from name
+
+**Credentials:** Read `SLACK_BOT_TOKEN` from `.mcp.json`.
+
+**API endpoints:**
+- History: `POST https://slack.com/api/conversations.history` with `channel`, `oldest`
+- Replies: `POST https://slack.com/api/conversations.replies` with `channel`, `ts`
+- Channel lookup: `POST https://slack.com/api/conversations.list` to find channel by name
+
+**diff_slack.py changes:**
+- Call `slack_client` functions directly
+- Build the raw messages JSON and write to `_slack_raw.json` from Python
+- No `call_llm` for Slack fetching
+
+### 14.5 PRD Extraction — Pure Python Parser
+
+Replace `call_llm(prd_extract.md)` with a deterministic Python function.
+
+**New module:** `src/scope_tracker/scripts/prd_parser.py`
+- `extract_features(raw_text, comments, identifier_col_names, story_col_names)` → list of feature dicts
+
+**Logic (all deterministic, no LLM):**
+1. Find "User Stories" section heading (case-insensitive regex)
+2. Within that section, find markdown/text tables
+3. Match header row columns against `identifier_col_names` and `story_col_names` (case-insensitive)
+4. For each data row: validate identifier matches `^\d+(\.\d+)*$`
+5. Build feature dict: `source_id`, `identifier`, `feature_name` (truncated 80 chars), `description`, `source_text`
+6. Attach comments by matching `anchor_text` to story text
+7. Derive `latest_comment_decision` from most recent comment
+8. Return list of feature dicts + `skipped_rows` list
+
+**Changes:**
+- `cli.py init-sheet` calls `prd_parser.extract_features()` instead of `call_llm(prd_extract.md)`
+- `run_pipeline.py` Step 2a calls `prd_parser.extract_features()` instead of `call_llm(prd_extract.md)`
+- Delete `prd_extract.md` prompt (or keep for reference only)
+
+### 14.6 Slack Report — Python Templating + Direct Post
+
+Replace `call_llm(slack_report.md)` with Python string formatting and direct Slack API post.
+
+**New function in `slack_client.py`:**
+- `post_message(bot_token, channel_id, text)` → posts a message to Slack
+
+**New module:** `src/scope_tracker/scripts/slack_reporter.py`
+- `build_report(project_name, run_datetime, steps_executed, run_summary, pending_conflicts)` → formatted Slack message string
+- `post_report(bot_token, channel_id, report_text)` → posts to Slack
+
+**Template logic:**
+- Header: project name, run date/time
+- Steps summary: which steps ran, which were skipped
+- Changes summary: rows added, rows updated, conflicts detected
+- Conflicts section: list each pending conflict (omit section if count = 0)
+- All formatting is deterministic — no LLM needed
+
+**Changes:**
+- `run_pipeline.py` Step 5 calls `slack_reporter` instead of `call_llm(slack_report.md)`
+- Delete `slack_report.md` prompt (or keep for reference only)

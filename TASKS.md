@@ -186,6 +186,85 @@ clear, all MCP configs are written correctly, all folder structures are created.
 
 ---
 
+## Group 9 — Google Sheets Direct API Integration
+**Status: PENDING**
+**Req ref:** Section 14.2
+**Goal:** Replace all LLM-based Google Sheet operations with direct `google-api-python-client` calls. After this group, `init-sheet` creates a real Google Sheet with full formatting and returns a sheet URL.
+
+| # | Task | Status |
+|---|---|---|
+| 9.1 | Add `google-auth-oauthlib` to `pyproject.toml` dependencies. Add `token.json` to `.gitignore`. | PENDING |
+| 9.2 | Write `src/scope_tracker/scripts/google_sheets.py` — OAuth2 auth flow (`get_sheets_service`): reads `client_secret.json`, handles first-run browser consent, saves/loads `token.json` for refresh. Scopes: `spreadsheets`. | PENDING |
+| 9.3 | Implement `google_sheets.create_spreadsheet(service, title, headers, rows)` — creates spreadsheet, writes header + data rows, returns `{"sheet_url", "spreadsheet_id"}` | PENDING |
+| 9.4 | Implement `google_sheets.apply_formatting(service, spreadsheet_id, formatting_spec)` — column widths, frozen rows/columns, band colors, bold headers, text wrapping, borders, band separators. Uses `batchUpdate`. | PENDING |
+| 9.5 | Implement `google_sheets.apply_dropdowns(service, spreadsheet_id, dropdown_spec)` — data validation for Scope Decision, Target Version, UAT Status, Blocker columns. | PENDING |
+| 9.6 | Implement `google_sheets.apply_conditional_formatting(service, spreadsheet_id, cond_format_spec)` — Effective Status backgrounds, Active Blocker red, Conflicting Signal orange, Blocker=Yes red. | PENDING |
+| 9.7 | Implement `google_sheets.read_spreadsheet(service, spreadsheet_id)` — read all rows from Sheet1 as list of lists. | PENDING |
+| 9.8 | Implement `google_sheets.update_spreadsheet(service, spreadsheet_id, changes, headers)` — batch apply add/update/update_cell changes. | PENDING |
+| 9.9 | Update `sheet_manager.py` — remove all `call_llm` usage. Use `google_sheets` module for create, read, update. Add `client_secret_path` and `token_path` parameters. | PENDING |
+| 9.10 | Update `cli.py init-sheet` — pass Google credentials paths to sheet_manager. Handle OAuth consent flow (first-run opens browser). | PENDING |
+| 9.11 | Update `installer.py init` — prompt for Google `client_secret.json` path during setup. Store path in config under `google_sheets.client_secret_path`. | PENDING |
+| 9.12 | Write `tests/test_google_sheets.py` — mock Google API: (a) create returns spreadsheet_id and URL; (b) read returns rows; (c) update applies changes; (d) formatting applies without error. | PENDING |
+| 9.13 | All tests pass. Run `scope-tracker init-sheet --project basket-test-slack` and verify sheet URL is returned. | PENDING |
+| 9.14 | Update `docs/configuration.md` and `docs/architecture.md` with Google Sheets direct API details. | PENDING |
+
+---
+
+## Group 10 — Confluence and Slack Direct API Clients
+**Status: PENDING**
+**Req ref:** Sections 14.3, 14.4
+**Goal:** Replace LLM-based Confluence and Slack data fetching with direct Python API calls. After this group, `diff_prd.py` (Confluence) and `diff_slack.py` fetch data without any LLM calls.
+
+| # | Task | Status |
+|---|---|---|
+| 10.1 | Write `src/scope_tracker/scripts/confluence_client.py` — `get_page_id_from_url(url)`, `fetch_page_metadata(site_name, email, token, page_id)`, `fetch_page_content(...)`, `fetch_page_comments(...)`. Uses `requests` with basic auth. Strips HTML from content. | PENDING |
+| 10.2 | Write `tests/test_confluence_client.py` — mock `requests`: (a) metadata returns modified_time; (b) content returns plain text; (c) comments returns list of comment dicts; (d) invalid URL raises clear error. | PENDING |
+| 10.3 | Update `diff_prd.py` — when `source_type == "confluence"`, use `confluence_client` instead of `call_llm`. Read credentials from `.mcp.json`. Write `_prd_meta.json`, `_prd_raw.txt`, `_prd_comments_raw.json` directly from Python. Keep `call_llm` path for `google-drive` source type (for now). | PENDING |
+| 10.4 | Write `src/scope_tracker/scripts/slack_client.py` — `resolve_channel_id(bot_token, channel_name)`, `fetch_channel_history(bot_token, channel_id, oldest_ts)`, `fetch_thread_replies(bot_token, channel_id, thread_ts)`. Uses `requests` to Slack Web API. Handles pagination. | PENDING |
+| 10.5 | Write `tests/test_slack_client.py` — mock `requests`: (a) channel history returns messages; (b) thread replies returns replies; (c) channel name resolves to ID; (d) pagination handled. | PENDING |
+| 10.6 | Update `diff_slack.py` — use `slack_client` instead of `call_llm(slack_fetch.md)`. Read `SLACK_BOT_TOKEN` from `.mcp.json`. Build raw messages JSON and write `_slack_raw.json` directly from Python. | PENDING |
+| 10.7 | Update `conflict_manager.py` — use `slack_client.fetch_thread_replies()` instead of `call_llm(slack_fetch.md)` for reading conflict thread replies. Keep `call_llm(conflict_resolve.md)` for interpreting the reply (LLM needed). | PENDING |
+| 10.8 | All tests pass. Run `scope-tracker init-sheet --project basket-test-slack` and verify PRD content is fetched via direct API. | PENDING |
+| 10.9 | Update `docs/architecture.md` with direct API client details. | PENDING |
+
+---
+
+## Group 11 — PRD Parser and Slack Reporter (Pure Python)
+**Status: PENDING**
+**Req ref:** Sections 14.5, 14.6
+**Goal:** Replace LLM-based PRD extraction and Slack report formatting with pure Python. After this group, the only `call_llm` usages remaining are the 3 semantic tasks: `slack_classify.md`, `slack_match.md`, `conflict_resolve.md`.
+
+| # | Task | Status |
+|---|---|---|
+| 11.1 | Write `src/scope_tracker/scripts/prd_parser.py` — `extract_features(raw_text, comments, identifier_col_names, story_col_names)`. Logic: find "User Stories" heading (case-insensitive), parse tables, match columns by header name, filter by identifier regex, build feature dicts, attach comments, derive latest_comment_decision. | PENDING |
+| 11.2 | Write `tests/test_prd_parser.py` — (a) extracts features from markdown table with valid IDs; (b) skips rows with non-numeric IDs; (c) returns empty list when no "User Stories" section; (d) attaches comments correctly; (e) handles multiple tables (only extracts from User Stories section); (f) handles pipe-delimited and whitespace-delimited tables. | PENDING |
+| 11.3 | Update `cli.py init-sheet` — call `prd_parser.extract_features()` instead of `call_llm(prd_extract.md)`. Write features JSON from Python. | PENDING |
+| 11.4 | Update `run_pipeline.py` Step 2a — call `prd_parser.extract_features()` instead of `call_llm(prd_extract.md)`. | PENDING |
+| 11.5 | Write `src/scope_tracker/scripts/slack_reporter.py` — `build_report(project_name, run_datetime, steps_executed, run_summary, pending_conflicts)` returns formatted Slack message string. `post_report(bot_token, channel_id, report_text)` posts via Slack API. | PENDING |
+| 11.6 | Write `tests/test_slack_reporter.py` — (a) report includes project name and run date; (b) omits conflict section when count=0; (c) includes each conflict as bullet when count>0; (d) post_report calls Slack API. Mock `requests`. | PENDING |
+| 11.7 | Update `run_pipeline.py` Step 5 — call `slack_reporter` instead of `call_llm(slack_report.md)`. Read `SLACK_BOT_TOKEN` from `.mcp.json`. | PENDING |
+| 11.8 | Audit: grep for all remaining `call_llm` usages. Confirm only 3 remain: `slack_classify.md`, `slack_match.md`, `conflict_resolve.md`. Remove unused prompt files or mark as deprecated. | PENDING |
+| 11.9 | All tests pass. | PENDING |
+| 11.10 | Update `docs/architecture.md` — reflect final LLM vs Python split. Update `README.md` if needed. | PENDING |
+
+---
+
+## Group 12 — Integration Test, Reinstall, and Verify
+**Status: PENDING**
+**Req ref:** All sections
+**Goal:** Full pipeline works end-to-end with direct API calls. Package reinstalls cleanly. All tests green.
+
+| # | Task | Status |
+|---|---|---|
+| 12.1 | Update `tests/test_e2e.py` — adjust for direct API calls (mock Google Sheets API, mock Confluence/Slack HTTP, mock `call_llm` only for the 3 semantic prompts). | PENDING |
+| 12.2 | Run full test suite: `pytest tests/ -v`. All tests pass. Fix any failures. | PENDING |
+| 12.3 | Push to GitHub. Reinstall from git URL. Verify `scope-tracker --help` works. | PENDING |
+| 12.4 | Run `scope-tracker init-sheet --project basket-test-slack` end-to-end. Verify: (a) Confluence PRD fetched via direct API; (b) Google Sheet created with URL; (c) config updated with sheet_url. | PENDING |
+| 12.5 | Update `CHANGELOG.md` — v1.1.0 entry: "Replaced LLM-as-middleman with direct API calls for Confluence, Slack, Google Sheets, PRD parsing, and report formatting." | PENDING |
+| 12.6 | `git tag v1.1.0` | PENDING |
+
+---
+
 ## Summary
 
 | Group | Description | Status |
@@ -198,3 +277,7 @@ clear, all MCP configs are written correctly, all folder structures are created.
 | 6 | CLI: init, add, init-sheet commands | DONE |
 | 7 | CLI: run, status, doctor commands + user docs | DONE |
 | 8 | End-to-end test and release | DONE |
+| 9 | Google Sheets direct API integration | PENDING |
+| 10 | Confluence and Slack direct API clients | PENDING |
+| 11 | PRD parser and Slack reporter (pure Python) | PENDING |
+| 12 | Integration test, reinstall, and verify | PENDING |
