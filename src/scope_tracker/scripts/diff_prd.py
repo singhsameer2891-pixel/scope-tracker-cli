@@ -83,7 +83,7 @@ def run(project_dir: str, config_path: str, project_name: str, force: bool = Fal
 
     # Determine paths for MCP call
     doc_url = prd_source.get("url", "")
-    cwd = os.path.dirname(os.path.dirname(project_dir))  # scope-tracker/ root
+    cwd = os.path.dirname(project_dir)  # scope-tracker/ root
     prompts_dir = os.path.join(cwd, "prompts")
 
     # Step 1: Fetch metadata to get modifiedTime
