@@ -4,6 +4,7 @@
 
 scope-tracker uses a multi-step pipeline orchestrated by `run_pipeline.py`.
 Each step is either a deterministic Python script or an LLM call via `claude -p`.
+Data fetching (Confluence, Slack, Google Sheets) uses direct API calls — LLM is reserved for semantic tasks only.
 
 ## Diff Scripts
 
@@ -18,16 +19,22 @@ These scripts gate whether downstream processing is needed by checking if source
 - `--config` — path to `scope_tracker_config.json`
 - `--project` — project name
 
-**Logic:**
+**Logic (Confluence source — direct API):**
 1. Read `prd_source` from config for the given project.
 2. If `type: none` → return `{"status": "not configured"}`.
+3. Load Confluence credentials from `.mcp.json`.
+4. Call `confluence_client.fetch_page_metadata()` to get `modifiedTime`.
+5. Compare to `run_state.prd.last_modified`.
+6. If unchanged → return `{"status": "skipped (unchanged)"}`.
+7. If changed → call `confluence_client.fetch_page_content()` and `fetch_page_comments()`.
+8. Write raw content to `system/{name}_prd_raw.txt`.
+9. Write inline comments to `system/{name}_prd_comments_raw.json`.
+10. Return `{"status": "changed", "last_modified": "...", "raw_path": "...", "comments_path": "..."}`.
+
+**Logic (Google Drive source — LLM via MCP):**
+1–2. Same as above.
 3. Call `claude -p prompts/prd_fetch_meta.md` to get `modifiedTime` via MCP.
-4. Compare to `run_state.prd.last_modified`.
-5. If unchanged → return `{"status": "skipped (unchanged)"}`.
-6. If changed → call `claude -p prompts/prd_fetch_content.md` to fetch full content.
-7. Write raw content to `system/{name}_prd_raw.txt`.
-8. Write inline comments to `system/{name}_prd_comments_raw.json`.
-9. Return `{"status": "changed", "last_modified": "...", "raw_path": "...", "comments_path": "..."}`.
+4–9. Same pattern, using `call_llm(prd_fetch_content.md)`.
 
 **Skip condition:** `modifiedTime` matches stored value in `run_state.json`.
 
@@ -40,14 +47,60 @@ These scripts gate whether downstream processing is needed by checking if source
 - `--config` — path to `scope_tracker_config.json`
 - `--project` — project name
 
-**Logic:**
+**Logic (direct Slack API):**
 1. Read `slack_channel` and `slack_last_run_timestamp` from config/run_state.
-2. Call `claude -p prompts/slack_fetch.md` with channel and watermark.
-3. If no new messages → return `{"status": "skipped (no new messages)"}`.
-4. If new messages → write to `system/{name}_slack_raw.json`.
-5. Return `{"status": "changed", "new_message_count": N, "raw_path": "..."}`.
+2. Load `SLACK_BOT_TOKEN` from `.mcp.json`.
+3. Call `slack_client.resolve_channel_id()` to get channel ID from name.
+4. Call `slack_client.fetch_channel_history()` with channel ID and watermark.
+5. For seen threads, call `slack_client.fetch_thread_replies()` to check for new replies.
+6. If no new messages → return `{"status": "skipped (no new messages)"}`.
+7. If new messages → write to `system/{name}_slack_raw.json`.
+8. Return `{"status": "changed", "new_message_count": N, "raw_path": "..."}`.
 
-**Skip condition:** LLM reports 0 new messages after the watermark timestamp.
+**Skip condition:** `fetch_channel_history()` returns 0 messages after the watermark timestamp.
+
+## Direct API Clients
+
+### `confluence_client.py`
+
+**Purpose:** Fetch Confluence page metadata, content, and inline comments via REST API.
+
+**Functions:**
+
+| Function | What it does |
+|---|---|
+| `get_page_id_from_url(url)` | Extracts page ID from a Confluence URL |
+| `fetch_page_metadata(site_name, email, api_token, page_id)` | Returns `{"modified_time": "ISO8601"}` |
+| `fetch_page_content(site_name, email, api_token, page_id)` | Returns plain text (HTML stripped) |
+| `fetch_page_comments(site_name, email, api_token, page_id)` | Returns list of `{anchor_text, author, date, comment_text}` |
+| `load_confluence_credentials(mcp_json_path)` | Loads credentials from `.mcp.json` |
+
+**API endpoints:**
+- Metadata: `GET /wiki/api/v2/pages/{id}?include=version`
+- Content: `GET /wiki/api/v2/pages/{id}?body-format=storage` → strip HTML to plain text
+- Comments: `GET /wiki/api/v2/pages/{id}/inline-comments`
+
+**Credentials:** Read from `.mcp.json` (`ATLASSIAN_SITE_NAME`, `ATLASSIAN_USER_EMAIL`, `ATLASSIAN_API_TOKEN`).
+
+### `slack_client.py`
+
+**Purpose:** Fetch Slack channel history and thread replies via Web API.
+
+**Functions:**
+
+| Function | What it does |
+|---|---|
+| `resolve_channel_id(bot_token, channel_name)` | Resolves channel name to ID via `conversations.list` |
+| `fetch_channel_history(bot_token, channel_id, oldest_ts)` | Returns messages after timestamp (paginated) |
+| `fetch_thread_replies(bot_token, channel_id, thread_ts)` | Returns all replies in a thread (paginated) |
+| `load_slack_credentials(mcp_json_path)` | Loads `SLACK_BOT_TOKEN` from `.mcp.json` |
+
+**API endpoints:**
+- History: `POST https://slack.com/api/conversations.history`
+- Replies: `POST https://slack.com/api/conversations.replies`
+- Channel lookup: `POST https://slack.com/api/conversations.list`
+
+**Credentials:** `SLACK_BOT_TOKEN` from `.mcp.json`.
 
 ## State Management
 
@@ -76,7 +129,7 @@ Deep-merges updates into existing `run_state.json` with special handling for:
 
 ### `call_llm.py`
 
-**Purpose:** Shared helper for invoking `claude -p` with prompt templates.
+**Purpose:** Shared helper for invoking `claude -p` with prompt templates. Used only for semantic LLM tasks (classification, matching, conflict interpretation).
 
 **Interface:**
 ```python
@@ -197,10 +250,11 @@ For each row:
 **Logic:**
 1. Read `conflicts` array from `run_state.json` where `resolved: false`.
 2. If empty → return `{"status": "no pending conflicts"}`.
-3. For each unresolved conflict: check the `slack_message_ts` thread for new replies via `call_llm(slack_fetch.md)`.
-4. If reply found: call `call_llm(conflict_resolve.md)` to parse the resolution.
-5. Apply resolution: write to Conflict Resolution column, update Scope Decision, mark resolved in run_state.
-6. Return `{"status": "ok", "resolved_count": N, "pending_count": N}`.
+3. Load Slack credentials from `.mcp.json`.
+4. For each unresolved conflict: call `slack_client.fetch_thread_replies()` to check for replies (direct API).
+5. If reply found: call `call_llm(conflict_resolve.md)` to parse the resolution (LLM needed for semantic interpretation).
+6. Apply resolution: write to Conflict Resolution column, update Scope Decision, mark resolved in run_state.
+7. Return `{"status": "ok", "resolved_count": N, "pending_count": N}`.
 
 **Output:** JSON with conflict resolution summary.
 
@@ -219,13 +273,13 @@ For each row:
 
 **Step sequence:**
 
-| Step | Name | Type | Condition | Script/Prompt |
+| Step | Name | Type | Condition | Script/Module |
 |---|---|---|---|---|
-| 0 | Conflict Resolution | Python script | Always runs | `conflict_manager.py` |
-| 1 (a+b) | Source Diff Checks | Python scripts (parallel) | Always runs | `diff_prd.py` + `diff_slack.py` via `ThreadPoolExecutor` |
+| 0 | Conflict Resolution | Python (direct Slack API + LLM) | Always runs | `conflict_manager.py` |
+| 1 (a+b) | Source Diff Checks | Python (direct API) (parallel) | Always runs | `diff_prd.py` + `diff_slack.py` via `ThreadPoolExecutor` |
 | 2a | PRD Extraction | LLM call | Only if `diff_prd` returned "changed" | `claude -p prd_extract.md` |
 | 2b | Slack Classification | LLM call | Only if `diff_slack` returned "changed" | `claude -p slack_classify.md` |
-| 3 | Sheet Update | Python script | Always runs (skipped in dry-run) | `sheet_manager.py --operation update` |
+| 3 | Sheet Update | Python (direct Google Sheets API) | Always runs (skipped in dry-run) | `sheet_manager.py --operation update` |
 | 4 | State Update | Python script | Always runs | `update_state.py` |
 | 5 | Slack Report | LLM call | Always runs (skipped in dry-run) | `claude -p slack_report.md` |
 
@@ -234,6 +288,22 @@ For each row:
 **`steps_executed` counter:** Incremented after each logical step (0, 1, 2, 3, 4, 5) regardless of whether sub-steps were skipped. Written to `system/{name}_steps_executed.json` after every step.
 
 **Dry-run mode:** Steps 3 (sheet update) and 5 (Slack report) are skipped. All other steps execute normally. The summary is printed to stderr instead.
+
+## LLM vs Direct API Split
+
+After Group 10, the tool uses this split:
+
+| Task | Method | Reason |
+|---|---|---|
+| Confluence metadata/content/comments | Direct REST API (`confluence_client.py`) | Deterministic fetch |
+| Slack channel history/thread replies | Direct Slack API (`slack_client.py`) | Deterministic fetch |
+| Google Sheet create/read/update | Direct Sheets API (`google_sheets.py`) | Deterministic CRUD |
+| PRD feature extraction | LLM (`prd_extract.md`) | Semantic parsing of tables |
+| Slack classification | LLM (`slack_classify.md`) | Semantic classification |
+| Slack-to-sheet matching | LLM (`slack_match.md`) | Semantic matching |
+| Conflict resolution parsing | LLM (`conflict_resolve.md`) | Semantic interpretation |
+| Slack report posting | LLM (`slack_report.md`) | Formatting + API call |
+| Google Drive metadata/content | LLM via MCP (`prd_fetch_meta.md`, `prd_fetch_content.md`) | Requires GDrive MCP |
 
 ## Runner Module
 
@@ -290,10 +360,10 @@ All prompt files live in `prompts/` and are invoked via `call_llm()` with `{{PLA
 
 | File | Purpose | MCP needed | Placeholders | Output format |
 |---|---|---|---|---|
-| `prd_fetch_meta.md` | Fetch document last-modified timestamp only | gdrive or confluence | `DOC_URL`, `SOURCE_TYPE`, `OUTPUT_PATH` | JSON file: `{"modified_time": "..."}` |
-| `prd_fetch_content.md` | Fetch full document text and inline comments | gdrive or confluence | `DOC_URL`, `SOURCE_TYPE`, `CONTENT_OUTPUT_PATH`, `COMMENTS_OUTPUT_PATH` | Plain text file + JSON comment array |
+| `prd_fetch_meta.md` | Fetch document last-modified timestamp only (Google Drive only) | gdrive | `DOC_URL`, `SOURCE_TYPE`, `OUTPUT_PATH` | JSON file: `{"modified_time": "..."}` |
+| `prd_fetch_content.md` | Fetch full document text and inline comments (Google Drive only) | gdrive | `DOC_URL`, `SOURCE_TYPE`, `CONTENT_OUTPUT_PATH`, `COMMENTS_OUTPUT_PATH` | Plain text file + JSON comment array |
 | `prd_extract.md` | Parse raw PRD, extract User Stories table rows with valid numeric IDs | None (file in/out) | `RAW_CONTENT_PATH`, `COMMENTS_RAW_PATH`, `OUTPUT_PATH`, `IDENTIFIER_COLUMN_NAMES`, `STORY_COLUMN_NAMES` | JSON array of feature objects |
-| `slack_fetch.md` | Fetch new Slack messages after watermark, re-read known threads | Slack | `CHANNEL`, `WATERMARK_TS`, `SEEN_THREAD_IDS`, `OUTPUT_PATH` | JSON file with threads and messages |
+| `slack_fetch.md` | *(Deprecated — replaced by `slack_client.py`)* | Slack | `CHANNEL`, `WATERMARK_TS`, `SEEN_THREAD_IDS`, `OUTPUT_PATH` | JSON file with threads and messages |
 | `slack_classify.md` | Classify scope-relevant threads from raw Slack data | None (file in/out) | `RAW_SLACK_PATH`, `OUTPUT_PATH` | JSON array of classified scope items |
 | `slack_match.md` | Semantically match one Slack item to existing sheet rows | None | `SLACK_ITEM_JSON`, `EXISTING_ROWS_JSON`, `OUTPUT_PATH` | JSON with match result and confidence |
 | `conflict_resolve.md` | Parse user's Slack reply to determine conflict resolution | None | `CONFLICT_JSON`, `REPLY_TEXT`, `OUTPUT_PATH` | JSON with resolution details |

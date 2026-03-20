@@ -351,9 +351,15 @@ class TestRunDryRunE2E:
             return "{}"
 
         # Run the pipeline directly with mock
+        # diff_slack and conflict_manager now use direct Slack API, not call_llm
         with patch("scope_tracker.scripts.call_llm.call_llm", side_effect=mock_call_llm), \
              patch("scope_tracker.scripts.diff_prd.call_llm", side_effect=mock_call_llm), \
-             patch("scope_tracker.scripts.diff_slack.call_llm", side_effect=mock_call_llm), \
+             patch("scope_tracker.scripts.diff_slack.load_slack_credentials", return_value={"bot_token": "xoxb-test"}), \
+             patch("scope_tracker.scripts.diff_slack.resolve_channel_id", return_value="C123"), \
+             patch("scope_tracker.scripts.diff_slack.fetch_channel_history", return_value=[]), \
+             patch("scope_tracker.scripts.conflict_manager.load_slack_credentials", return_value={"bot_token": "xoxb-test"}), \
+             patch("scope_tracker.scripts.conflict_manager.resolve_channel_id", return_value="C123"), \
+             patch("scope_tracker.scripts.conflict_manager.fetch_thread_replies", return_value=[]), \
              patch("scope_tracker.scripts.conflict_manager.call_llm", side_effect=mock_call_llm), \
              patch("scope_tracker.scripts.run_pipeline.call_llm", side_effect=mock_call_llm), \
              patch("scope_tracker.scripts.run_pipeline.sheet_manager") as mock_sheet:

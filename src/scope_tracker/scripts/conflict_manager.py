@@ -1,8 +1,8 @@
 """Manage conflict resolution by reading Slack replies to conflict messages.
 
 For each unresolved conflict in run_state.json, checks if the Slack thread
-has new replies. If a reply is found, uses the LLM to parse the resolution
-and applies it to the sheet and run_state.
+has new replies using the direct Slack API. If a reply is found, uses the LLM
+to parse the resolution and applies it to the sheet and run_state.
 
 All stdout output is JSON. Human-readable logs go to stderr.
 
@@ -23,6 +23,11 @@ import sys
 from datetime import datetime, timezone, timedelta
 
 from scope_tracker.scripts.call_llm import call_llm
+from scope_tracker.scripts.slack_client import (
+    fetch_thread_replies,
+    load_slack_credentials,
+    resolve_channel_id,
+)
 
 
 # IST timezone
@@ -81,8 +86,8 @@ def run(project_dir: str, config_path: str, project_name: str) -> dict:
     """Execute conflict resolution check.
 
     Reads unresolved conflicts from run_state.json. For each, checks if the
-    Slack thread has a reply. If so, parses the reply via LLM and applies
-    the resolution to the sheet and run_state.
+    Slack thread has a reply using the direct Slack API. If so, parses the
+    reply via LLM and applies the resolution to the sheet and run_state.
 
     Args:
         project_dir: Path to the project directory.
@@ -114,10 +119,27 @@ def run(project_dir: str, config_path: str, project_name: str) -> dict:
 
     _log(f"Found {len(unresolved)} unresolved conflict(s). Checking for replies...")
 
-    resolved_count = 0
+    # Load Slack credentials for direct API calls
+    mcp_json_path = os.path.join(base_dir, ".mcp.json")
+    try:
+        creds = load_slack_credentials(mcp_json_path)
+    except RuntimeError as e:
+        _log(f"Error loading Slack credentials: {e}")
+        sys.exit(1)
+
+    bot_token = creds["bot_token"]
+
+    # Resolve the reporting channel ID
     reporting_channel = config.get("global_settings", {}).get(
         "reporting_slack_channel", "scope-tracker"
     )
+    try:
+        channel_id = resolve_channel_id(bot_token, reporting_channel)
+    except RuntimeError as e:
+        _log(f"Error resolving reporting channel '{reporting_channel}': {e}")
+        sys.exit(1)
+
+    resolved_count = 0
 
     for conflict in unresolved:
         conflict_id = conflict.get("id", "unknown")
@@ -127,41 +149,19 @@ def run(project_dir: str, config_path: str, project_name: str) -> dict:
             _log(f"Conflict {conflict_id}: no slack_message_ts, skipping.")
             continue
 
-        # Check for replies to the conflict thread via LLM
-        reply_output_path = os.path.join(
-            system_dir, f"{project_name}_conflict_reply_{conflict_id.replace(':', '_')}.json"
-        )
-
-        # Use slack_fetch to check for thread replies
+        # Fetch thread replies via direct Slack API
         try:
-            call_llm(
-                prompt_file=os.path.join(prompts_dir, "slack_fetch.md"),
-                placeholders={
-                    "CHANNEL": reporting_channel,
-                    "WATERMARK_TS": slack_message_ts,
-                    "SEEN_THREAD_IDS": json.dumps([slack_message_ts]),
-                    "OUTPUT_PATH": reply_output_path,
-                },
-                cwd=base_dir,
-            )
+            replies = fetch_thread_replies(bot_token, channel_id, slack_message_ts)
         except RuntimeError as e:
             _log(f"Conflict {conflict_id}: error checking replies: {e}")
             continue
 
-        # Read reply data
-        reply_data = _load_json(reply_output_path)
-        threads = reply_data.get("threads", [])
-
-        # Find the conflict thread and check for replies
+        # Find reply (skip the original message, look for responses)
         reply_text = None
-        for thread in threads:
-            if thread.get("thread_ts") == slack_message_ts:
-                messages = thread.get("messages", [])
-                # Skip the original conflict message (first message), look for replies
-                if len(messages) > 1:
-                    # Take the latest reply
-                    reply_text = messages[-1].get("text", "")
-                break
+        for msg in replies:
+            if msg.get("ts") != slack_message_ts:
+                # This is a reply, take the latest one
+                reply_text = msg.get("text", "")
 
         if not reply_text:
             _log(f"Conflict {conflict_id}: no reply found yet.")
@@ -169,7 +169,7 @@ def run(project_dir: str, config_path: str, project_name: str) -> dict:
 
         _log(f"Conflict {conflict_id}: reply found, parsing resolution...")
 
-        # Parse the reply using conflict_resolve.md
+        # Parse the reply using conflict_resolve.md (LLM needed for semantic interpretation)
         conflict_json_path = os.path.join(
             system_dir, f"{project_name}_conflict_{conflict_id.replace(':', '_')}.json"
         )

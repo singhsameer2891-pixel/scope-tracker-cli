@@ -211,21 +211,21 @@ clear, all MCP configs are written correctly, all folder structures are created.
 ---
 
 ## Group 10 — Confluence and Slack Direct API Clients
-**Status: PENDING**
+**Status: DONE**
 **Req ref:** Sections 14.3, 14.4
 **Goal:** Replace LLM-based Confluence and Slack data fetching with direct Python API calls. After this group, `diff_prd.py` (Confluence) and `diff_slack.py` fetch data without any LLM calls.
 
 | # | Task | Status |
 |---|---|---|
-| 10.1 | Write `src/scope_tracker/scripts/confluence_client.py` — `get_page_id_from_url(url)`, `fetch_page_metadata(site_name, email, token, page_id)`, `fetch_page_content(...)`, `fetch_page_comments(...)`. Uses `requests` with basic auth. Strips HTML from content. | PENDING |
-| 10.2 | Write `tests/test_confluence_client.py` — mock `requests`: (a) metadata returns modified_time; (b) content returns plain text; (c) comments returns list of comment dicts; (d) invalid URL raises clear error. | PENDING |
-| 10.3 | Update `diff_prd.py` — when `source_type == "confluence"`, use `confluence_client` instead of `call_llm`. Read credentials from `.mcp.json`. Write `_prd_meta.json`, `_prd_raw.txt`, `_prd_comments_raw.json` directly from Python. Keep `call_llm` path for `google-drive` source type (for now). | PENDING |
-| 10.4 | Write `src/scope_tracker/scripts/slack_client.py` — `resolve_channel_id(bot_token, channel_name)`, `fetch_channel_history(bot_token, channel_id, oldest_ts)`, `fetch_thread_replies(bot_token, channel_id, thread_ts)`. Uses `requests` to Slack Web API. Handles pagination. | PENDING |
-| 10.5 | Write `tests/test_slack_client.py` — mock `requests`: (a) channel history returns messages; (b) thread replies returns replies; (c) channel name resolves to ID; (d) pagination handled. | PENDING |
-| 10.6 | Update `diff_slack.py` — use `slack_client` instead of `call_llm(slack_fetch.md)`. Read `SLACK_BOT_TOKEN` from `.mcp.json`. Build raw messages JSON and write `_slack_raw.json` directly from Python. | PENDING |
-| 10.7 | Update `conflict_manager.py` — use `slack_client.fetch_thread_replies()` instead of `call_llm(slack_fetch.md)` for reading conflict thread replies. Keep `call_llm(conflict_resolve.md)` for interpreting the reply (LLM needed). | PENDING |
-| 10.8 | All tests pass. Run `scope-tracker init-sheet --project basket-test-slack` and verify PRD content is fetched via direct API. | PENDING |
-| 10.9 | Update `docs/architecture.md` with direct API client details. | PENDING |
+| 10.1 | Write `src/scope_tracker/scripts/confluence_client.py` — `get_page_id_from_url(url)`, `fetch_page_metadata(site_name, email, token, page_id)`, `fetch_page_content(...)`, `fetch_page_comments(...)`. Uses `requests` with basic auth. Strips HTML from content. | DONE |
+| 10.2 | Write `tests/test_confluence_client.py` — mock `requests`: (a) metadata returns modified_time; (b) content returns plain text; (c) comments returns list of comment dicts; (d) invalid URL raises clear error. | DONE |
+| 10.3 | Update `diff_prd.py` — when `source_type == "confluence"`, use `confluence_client` instead of `call_llm`. Read credentials from `.mcp.json`. Write `_prd_meta.json`, `_prd_raw.txt`, `_prd_comments_raw.json` directly from Python. Keep `call_llm` path for `google-drive` source type (for now). | DONE |
+| 10.4 | Write `src/scope_tracker/scripts/slack_client.py` — `resolve_channel_id(bot_token, channel_name)`, `fetch_channel_history(bot_token, channel_id, oldest_ts)`, `fetch_thread_replies(bot_token, channel_id, thread_ts)`. Uses `requests` to Slack Web API. Handles pagination. | DONE |
+| 10.5 | Write `tests/test_slack_client.py` — mock `requests`: (a) channel history returns messages; (b) thread replies returns replies; (c) channel name resolves to ID; (d) pagination handled. | DONE |
+| 10.6 | Update `diff_slack.py` — use `slack_client` instead of `call_llm(slack_fetch.md)`. Read `SLACK_BOT_TOKEN` from `.mcp.json`. Build raw messages JSON and write `_slack_raw.json` directly from Python. | DONE |
+| 10.7 | Update `conflict_manager.py` — use `slack_client.fetch_thread_replies()` instead of `call_llm(slack_fetch.md)` for reading conflict thread replies. Keep `call_llm(conflict_resolve.md)` for interpreting the reply (LLM needed). | DONE |
+| 10.8 | All tests pass. Run `scope-tracker init-sheet --project basket-test-slack` and verify PRD content is fetched via direct API. | DONE |
+| 10.9 | Update `docs/architecture.md` with direct API client details. | DONE |
 
 ---
 
@@ -296,7 +296,7 @@ clear, all MCP configs are written correctly, all folder structures are created.
 | 7 | CLI: run, status, doctor commands + user docs | DONE |
 | 8 | End-to-end test and release | DONE |
 | 9 | Google Sheets direct API integration | DONE |
-| 10 | Confluence and Slack direct API clients | PENDING |
+| 10 | Confluence and Slack direct API clients | DONE |
 | 11 | PRD parser and Slack reporter (pure Python) | PENDING |
 | 12 | Self-healing dependency management | PENDING |
 | 13 | Integration test, reinstall, and verify | PENDING |

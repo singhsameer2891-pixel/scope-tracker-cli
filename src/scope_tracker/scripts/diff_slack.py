@@ -1,5 +1,6 @@
 """Check if there are new Slack messages since the last run watermark.
 
+Uses direct Slack Web API calls via slack_client instead of LLM.
 If new messages exist, fetches and writes them to a raw JSON file.
 If no new messages, returns a skip result. All stdout is JSON.
 Human-readable logs go to stderr.
@@ -19,7 +20,12 @@ import json
 import os
 import sys
 
-from scope_tracker.scripts.call_llm import call_llm
+from scope_tracker.scripts.slack_client import (
+    fetch_channel_history,
+    fetch_thread_replies,
+    load_slack_credentials,
+    resolve_channel_id,
+)
 
 
 def _load_config(config_path: str) -> dict:
@@ -57,7 +63,7 @@ def _load_run_state(project_dir: str, project_name: str) -> dict:
 
 
 def run(project_dir: str, config_path: str, project_name: str) -> dict:
-    """Execute the Slack diff check.
+    """Execute the Slack diff check using direct Slack API calls.
 
     Args:
         project_dir: Path to the project directory.
@@ -80,40 +86,98 @@ def run(project_dir: str, config_path: str, project_name: str) -> dict:
 
     # Get watermark and seen thread IDs from run_state
     run_state = _load_run_state(project_dir, project_name)
-    watermark_ts = project.get("slack_last_run_timestamp") or run_state.get("slack", {}).get("last_run_timestamp", "0")
-    seen_thread_ids = json.dumps(run_state.get("slack", {}).get("seen_thread_ids", []))
+    watermark_ts = project.get("slack_last_run_timestamp") or run_state.get(
+        "slack", {}
+    ).get("last_run_timestamp", "0")
+    seen_thread_ids = run_state.get("slack", {}).get("seen_thread_ids", [])
 
-    cwd = os.path.dirname(os.path.dirname(project_dir))  # scope-tracker/ root
-    prompts_dir = os.path.join(cwd, "prompts")
-
-    raw_path = os.path.join(system_dir, f"{project_name}_slack_raw.json")
-
-    print(f"Checking Slack channel '{slack_channel}' for new messages...", file=sys.stderr)
+    # Load Slack credentials from .mcp.json
+    base_dir = os.path.dirname(project_dir)
+    mcp_json_path = os.path.join(base_dir, ".mcp.json")
 
     try:
-        call_llm(
-            prompt_file=os.path.join(prompts_dir, "slack_fetch.md"),
-            placeholders={
-                "CHANNEL": slack_channel,
-                "WATERMARK_TS": watermark_ts,
-                "SEEN_THREAD_IDS": seen_thread_ids,
-                "OUTPUT_PATH": raw_path,
-            },
-            cwd=cwd,
-        )
+        creds = load_slack_credentials(mcp_json_path)
     except RuntimeError as e:
-        print(f"Error fetching Slack messages: {e}", file=sys.stderr)
+        print(f"Error loading Slack credentials: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Read the output to check if there are new messages
+    bot_token = creds["bot_token"]
+
+    # Resolve channel name to ID
+    print(f"Checking Slack channel '{slack_channel}' for new messages...", file=sys.stderr)
     try:
-        with open(raw_path, "r", encoding="utf-8") as f:
-            slack_data = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        print(f"Error reading Slack output: {e}", file=sys.stderr)
+        channel_id = resolve_channel_id(bot_token, slack_channel)
+    except RuntimeError as e:
+        print(f"Error resolving Slack channel: {e}", file=sys.stderr)
         sys.exit(1)
 
-    new_count = slack_data.get("new_message_count", 0)
+    # Fetch channel history after watermark
+    try:
+        messages = fetch_channel_history(bot_token, channel_id, watermark_ts)
+    except RuntimeError as e:
+        print(f"Error fetching Slack history: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Build threads structure: group messages by thread_ts
+    threads_map: dict[str, dict] = {}
+    new_thread_ids: list[str] = []
+
+    for msg in messages:
+        thread_ts = msg.get("thread_ts", msg.get("ts", ""))
+        if thread_ts not in threads_map:
+            threads_map[thread_ts] = {
+                "thread_ts": thread_ts,
+                "is_new": thread_ts not in seen_thread_ids,
+                "messages": [],
+            }
+            new_thread_ids.append(thread_ts)
+        threads_map[thread_ts]["messages"].append({
+            "ts": msg.get("ts", ""),
+            "author": msg.get("user", "unknown"),
+            "text": msg.get("text", ""),
+        })
+
+    # Re-read seen threads for new replies
+    for thread_id in seen_thread_ids:
+        if thread_id not in threads_map:
+            try:
+                replies = fetch_thread_replies(bot_token, channel_id, thread_id)
+                if len(replies) > 0:
+                    threads_map[thread_id] = {
+                        "thread_ts": thread_id,
+                        "is_new": False,
+                        "messages": [
+                            {
+                                "ts": r.get("ts", ""),
+                                "author": r.get("user", "unknown"),
+                                "text": r.get("text", ""),
+                            }
+                            for r in replies
+                        ],
+                    }
+            except RuntimeError as e:
+                print(
+                    f"Warning: could not fetch replies for thread {thread_id}: {e}",
+                    file=sys.stderr,
+                )
+
+    threads_list = list(threads_map.values())
+    new_count = len(messages)
+
+    # Write raw output
+    raw_path = os.path.join(system_dir, f"{project_name}_slack_raw.json")
+    slack_data = {
+        "new_message_count": new_count,
+        "threads": threads_list,
+        "latest_ts": messages[0].get("ts", watermark_ts) if messages else watermark_ts,
+    }
+
+    try:
+        with open(raw_path, "w", encoding="utf-8") as f:
+            json.dump(slack_data, f, indent=2, ensure_ascii=False)
+    except OSError as e:
+        print(f"Error writing Slack raw output: {e}", file=sys.stderr)
+        sys.exit(1)
 
     if new_count == 0:
         print("No new Slack messages — skipping.", file=sys.stderr)

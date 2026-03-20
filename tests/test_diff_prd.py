@@ -1,8 +1,8 @@
 """Tests for diff_prd.py — PRD change detection.
 
 Tests:
-    (a) mtime unchanged → returns skipped
-    (b) mtime changed → calls prd_fetch_content, writes files, returns changed
+    (a) mtime unchanged → returns skipped (Google Drive + Confluence)
+    (b) mtime changed → fetches content, returns changed (Google Drive + Confluence)
     (c) type none → returns not-configured
 """
 
@@ -17,22 +17,18 @@ from scope_tracker.scripts.diff_prd import run
 
 @pytest.fixture
 def project_setup(tmp_path):
-    """Create a minimal project structure for testing."""
-    # Create project dir with system subfolder
+    """Create a minimal project structure for testing (Google Drive source)."""
     project_dir = tmp_path / "demo"
     system_dir = project_dir / "system"
     system_dir.mkdir(parents=True)
 
-    # Create scope-tracker root structure (project_dir's grandparent + prompts)
     scope_root = tmp_path
     prompts_dir = scope_root / "prompts"
     prompts_dir.mkdir(exist_ok=True)
 
-    # Write stub prompt files
     (prompts_dir / "prd_fetch_meta.md").write_text("Fetch meta for {{DOC_URL}}")
     (prompts_dir / "prd_fetch_content.md").write_text("Fetch content for {{DOC_URL}}")
 
-    # Write config
     config_path = scope_root / "scope_tracker_config.json"
     config = {
         "projects": [
@@ -64,6 +60,60 @@ def project_setup(tmp_path):
     }
 
 
+@pytest.fixture
+def confluence_setup(tmp_path):
+    """Create a minimal project structure for testing (Confluence source)."""
+    base_dir = tmp_path / "scope-tracker"
+    project_dir = base_dir / "demo"
+    system_dir = project_dir / "system"
+    system_dir.mkdir(parents=True)
+
+    # Write .mcp.json with Confluence credentials
+    mcp_config = {
+        "mcpServers": {
+            "confluence": {
+                "command": "npx",
+                "args": [],
+                "env": {
+                    "ATLASSIAN_SITE_NAME": "mysite",
+                    "ATLASSIAN_USER_EMAIL": "user@example.com",
+                    "ATLASSIAN_API_TOKEN": "test-token",
+                },
+            }
+        }
+    }
+    (base_dir / ".mcp.json").write_text(json.dumps(mcp_config))
+
+    config_path = base_dir / "scope_tracker_config.json"
+    config = {
+        "projects": [
+            {
+                "name": "demo",
+                "enabled": True,
+                "folder": "demo",
+                "slack_channel": "demo-scope",
+                "sheet_url": "",
+                "prd_source": {
+                    "type": "confluence",
+                    "url": "https://mysite.atlassian.net/wiki/spaces/PROJ/pages/123456/PRD",
+                    "last_modified": None,
+                },
+                "slack_last_run_timestamp": None,
+                "run_count": 0,
+                "last_run_date": None,
+            }
+        ]
+    }
+    config_path.write_text(json.dumps(config))
+
+    return {
+        "project_dir": str(project_dir),
+        "config_path": str(config_path),
+        "system_dir": str(system_dir),
+        "base_dir": str(base_dir),
+    }
+
+
 class TestDiffPrdTypeNone:
     """Test that type=none returns not-configured."""
 
@@ -87,19 +137,17 @@ class TestDiffPrdTypeNone:
 
 
 class TestDiffPrdUnchanged:
-    """Test that unchanged mtime returns skipped."""
+    """Test that unchanged mtime returns skipped (Google Drive path)."""
 
     def test_skipped_when_unchanged(self, project_setup):
         setup = project_setup
         stored_mtime = "2026-03-17T10:23:00Z"
 
-        # Write existing run_state with matching mtime
         state_path = os.path.join(setup["system_dir"], "demo_run_state.json")
         with open(state_path, "w") as f:
             json.dump({"prd": {"last_modified": stored_mtime}}, f)
 
-        def mock_call_llm(prompt_file, placeholders, cwd, timeout=300):
-            # Meta call returns same mtime
+        def mock_call_llm(prompt_file, placeholders, cwd, timeout=300, expected_output_files=None):
             output_path = placeholders.get("OUTPUT_PATH", "")
             if output_path:
                 with open(output_path, "w") as f:
@@ -114,21 +162,20 @@ class TestDiffPrdUnchanged:
 
 
 class TestDiffPrdChanged:
-    """Test that changed mtime triggers content fetch."""
+    """Test that changed mtime triggers content fetch (Google Drive path)."""
 
     def test_changed_fetches_content(self, project_setup):
         setup = project_setup
         old_mtime = "2026-03-17T10:23:00Z"
         new_mtime = "2026-03-18T14:00:00Z"
 
-        # Write existing run_state with old mtime
         state_path = os.path.join(setup["system_dir"], "demo_run_state.json")
         with open(state_path, "w") as f:
             json.dump({"prd": {"last_modified": old_mtime}}, f)
 
         call_count = {"meta": 0, "content": 0}
 
-        def mock_call_llm(prompt_file, placeholders, cwd, timeout=300):
+        def mock_call_llm(prompt_file, placeholders, cwd, timeout=300, expected_output_files=None):
             if "prd_fetch_meta" in prompt_file:
                 call_count["meta"] += 1
                 output_path = placeholders.get("OUTPUT_PATH", "")
@@ -157,6 +204,73 @@ class TestDiffPrdChanged:
         assert call_count["meta"] == 1
         assert call_count["content"] == 1
 
+        assert os.path.exists(result["raw_path"])
+        assert os.path.exists(result["comments_path"])
+
+
+class TestDiffPrdConfluenceUnchanged:
+    """Test Confluence source: unchanged mtime returns skipped."""
+
+    @patch("scope_tracker.scripts.diff_prd.fetch_page_metadata")
+    def test_skipped_when_unchanged(self, mock_meta, confluence_setup):
+        setup = confluence_setup
+        stored_mtime = "2026-03-17T10:23:00.000Z"
+
+        state_path = os.path.join(setup["system_dir"], "demo_run_state.json")
+        with open(state_path, "w") as f:
+            json.dump({"prd": {"last_modified": stored_mtime}}, f)
+
+        mock_meta.return_value = {"modified_time": stored_mtime}
+
+        result = run(setup["project_dir"], setup["config_path"], "demo")
+
+        assert result["status"] == "skipped (unchanged)"
+        assert result["last_modified"] == stored_mtime
+        mock_meta.assert_called_once()
+
+
+class TestDiffPrdConfluenceChanged:
+    """Test Confluence source: changed mtime fetches content directly."""
+
+    @patch("scope_tracker.scripts.diff_prd.fetch_page_comments")
+    @patch("scope_tracker.scripts.diff_prd.fetch_page_content")
+    @patch("scope_tracker.scripts.diff_prd.fetch_page_metadata")
+    def test_changed_fetches_content(self, mock_meta, mock_content, mock_comments, confluence_setup):
+        setup = confluence_setup
+        old_mtime = "2026-03-17T10:23:00.000Z"
+        new_mtime = "2026-03-18T14:00:00.000Z"
+
+        state_path = os.path.join(setup["system_dir"], "demo_run_state.json")
+        with open(state_path, "w") as f:
+            json.dump({"prd": {"last_modified": old_mtime}}, f)
+
+        mock_meta.return_value = {"modified_time": new_mtime}
+        mock_content.return_value = "## User Stories\n\n| ID | Story |\n| 1 | Feature A |"
+        mock_comments.return_value = [
+            {"anchor_text": "Feature A", "author": "Jane", "date": "2026-03-18", "comment_text": "Approved"}
+        ]
+
+        result = run(setup["project_dir"], setup["config_path"], "demo")
+
+        assert result["status"] == "changed"
+        assert result["last_modified"] == new_mtime
+        assert "raw_path" in result
+        assert "comments_path" in result
+
         # Verify files were written
         assert os.path.exists(result["raw_path"])
         assert os.path.exists(result["comments_path"])
+
+        with open(result["raw_path"]) as f:
+            content = f.read()
+        assert "User Stories" in content
+
+        with open(result["comments_path"]) as f:
+            comments = json.load(f)
+        assert len(comments) == 1
+        assert comments[0]["author"] == "Jane"
+
+        # No call_llm should have been called
+        mock_meta.assert_called_once()
+        mock_content.assert_called_once()
+        mock_comments.assert_called_once()

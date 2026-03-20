@@ -19,7 +19,6 @@ from scope_tracker.scripts import conflict_manager
 @pytest.fixture
 def project_setup(tmp_path):
     """Set up a minimal project structure for testing."""
-    # Create scope-tracker/demo/system/ structure
     base_dir = tmp_path / "scope-tracker"
     project_dir = base_dir / "demo"
     system_dir = project_dir / "system"
@@ -29,7 +28,21 @@ def project_setup(tmp_path):
 
     # Write a minimal conflict_resolve.md prompt
     (prompts_dir / "conflict_resolve.md").write_text("resolve {{CONFLICT_JSON}} {{REPLY_TEXT}} {{OUTPUT_PATH}}")
-    (prompts_dir / "slack_fetch.md").write_text("fetch {{CHANNEL}} {{WATERMARK_TS}} {{SEEN_THREAD_IDS}} {{OUTPUT_PATH}}")
+
+    # Write .mcp.json with Slack credentials
+    mcp_config = {
+        "mcpServers": {
+            "slack": {
+                "command": "npx",
+                "args": [],
+                "env": {
+                    "SLACK_BOT_TOKEN": "xoxb-test-token",
+                    "SLACK_TEAM_ID": "T123",
+                },
+            }
+        }
+    }
+    (base_dir / ".mcp.json").write_text(json.dumps(mcp_config))
 
     # Write config
     config = {
@@ -116,8 +129,9 @@ class TestNoConflicts:
 class TestConflictNoReply:
     """Test case (b): conflict with no reply."""
 
-    @patch("scope_tracker.scripts.conflict_manager.call_llm")
-    def test_pending_unchanged_no_reply(self, mock_call_llm, project_setup):
+    @patch("scope_tracker.scripts.conflict_manager.resolve_channel_id")
+    @patch("scope_tracker.scripts.conflict_manager.fetch_thread_replies")
+    def test_pending_unchanged_no_reply(self, mock_replies, mock_resolve, project_setup):
         """Conflict stays pending when no reply found in Slack thread."""
         _write_run_state(project_setup["system_dir"], {
             "conflicts": [
@@ -134,26 +148,11 @@ class TestConflictNoReply:
             ],
         })
 
-        def side_effect(prompt_file, placeholders, cwd, **kwargs):
-            output_path = placeholders.get("OUTPUT_PATH", "")
-            if "slack_fetch" in prompt_file:
-                # Return thread with no replies (only original message)
-                data = {
-                    "new_message_count": 0,
-                    "threads": [
-                        {
-                            "thread_ts": "1773906163.221689",
-                            "messages": [
-                                {"ts": "1773906163.221689", "author": "Bot", "text": "Conflict posted"}
-                            ],
-                        }
-                    ],
-                }
-                with open(output_path, "w") as f:
-                    json.dump(data, f)
-            return ""
-
-        mock_call_llm.side_effect = side_effect
+        mock_resolve.return_value = "C999"
+        # Return thread with only the original message (no replies)
+        mock_replies.return_value = [
+            {"ts": "1773906163.221689", "user": "Bot", "text": "Conflict posted"},
+        ]
 
         result = conflict_manager.run(
             project_setup["project_dir"],
@@ -170,7 +169,9 @@ class TestConflictWithReply:
     """Test case (c): conflict with reply → applies resolution."""
 
     @patch("scope_tracker.scripts.conflict_manager.call_llm")
-    def test_resolve_conflict(self, mock_call_llm, project_setup):
+    @patch("scope_tracker.scripts.conflict_manager.resolve_channel_id")
+    @patch("scope_tracker.scripts.conflict_manager.fetch_thread_replies")
+    def test_resolve_conflict(self, mock_replies, mock_resolve, mock_call_llm, project_setup):
         """Conflict is resolved when reply is found and parsed."""
         _write_run_state(project_setup["system_dir"], {
             "conflicts": [
@@ -187,24 +188,16 @@ class TestConflictWithReply:
             ],
         })
 
-        def side_effect(prompt_file, placeholders, cwd, **kwargs):
+        mock_resolve.return_value = "C999"
+        # Return thread with original message + a reply
+        mock_replies.return_value = [
+            {"ts": "1773906163.221689", "user": "Bot", "text": "Conflict posted"},
+            {"ts": "1773906164.000000", "user": "Sam", "text": "Sheet"},
+        ]
+
+        def llm_side_effect(prompt_file, placeholders, cwd, **kwargs):
             output_path = placeholders.get("OUTPUT_PATH", "")
-            if "slack_fetch" in prompt_file:
-                data = {
-                    "new_message_count": 1,
-                    "threads": [
-                        {
-                            "thread_ts": "1773906163.221689",
-                            "messages": [
-                                {"ts": "1773906163.221689", "author": "Bot", "text": "Conflict posted"},
-                                {"ts": "1773906164.000000", "author": "Sam", "text": "Sheet"},
-                            ],
-                        }
-                    ],
-                }
-                with open(output_path, "w") as f:
-                    json.dump(data, f)
-            elif "conflict_resolve" in prompt_file:
+            if "conflict_resolve" in prompt_file:
                 resolution = {
                     "resolved": True,
                     "winning_source": "Sheet",
@@ -216,7 +209,7 @@ class TestConflictWithReply:
                     json.dump(resolution, f)
             return ""
 
-        mock_call_llm.side_effect = side_effect
+        mock_call_llm.side_effect = llm_side_effect
 
         result = conflict_manager.run(
             project_setup["project_dir"],
@@ -231,6 +224,11 @@ class TestConflictWithReply:
         # Verify run_state was updated
         state = _read_run_state(project_setup["system_dir"])
         assert state["conflicts"][0]["resolved"] is True
+
+        # Verify call_llm was only called for conflict_resolve (LLM semantic task)
+        mock_call_llm.assert_called_once()
+        call_args = mock_call_llm.call_args
+        assert "conflict_resolve" in call_args[1].get("prompt_file", "") or "conflict_resolve" in call_args[0][0]
 
 
 class TestConflictSuppression:

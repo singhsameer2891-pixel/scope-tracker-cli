@@ -1,6 +1,8 @@
 """Check if the PRD source document has changed since the last run.
 
-If changed, fetches full content and inline comments via MCP.
+If changed, fetches full content and inline comments.
+For Confluence sources: uses direct REST API calls via confluence_client.
+For Google Drive sources: uses LLM calls via call_llm (MCP).
 If unchanged, returns a skip result. All stdout is JSON.
 Human-readable logs go to stderr.
 
@@ -21,6 +23,13 @@ import os
 import sys
 
 from scope_tracker.scripts.call_llm import call_llm
+from scope_tracker.scripts.confluence_client import (
+    get_page_id_from_url,
+    fetch_page_metadata,
+    fetch_page_content,
+    fetch_page_comments,
+    load_confluence_credentials,
+)
 
 
 def _load_config(config_path: str) -> dict:
@@ -57,33 +66,119 @@ def _load_run_state(project_dir: str, project_name: str) -> dict:
         return {}
 
 
-def run(project_dir: str, config_path: str, project_name: str, force: bool = False) -> dict:
-    """Execute the PRD diff check.
+def _run_confluence(
+    project_dir: str, project_name: str, prd_source: dict, run_state: dict, force: bool
+) -> dict:
+    """Handle PRD diff for Confluence sources using direct REST API.
 
     Args:
-        project_dir: Path to the project directory.
-        config_path: Path to scope_tracker_config.json.
+        project_dir: Absolute path to the project directory.
         project_name: Name of the project.
+        prd_source: PRD source config dict.
+        run_state: Current run state dict.
+        force: If True, skip mtime comparison.
 
     Returns:
         Result dict with status and optional paths.
     """
-    config = _load_config(config_path)
-    project = _find_project(config, project_name)
-    prd_source = project.get("prd_source", {})
-
-    # Check if PRD is configured
-    source_type = prd_source.get("type", "none")
-    if source_type == "none":
-        return {"status": "not configured"}
-
-    project_dir = os.path.expanduser(os.path.abspath(project_dir))
     system_dir = os.path.join(project_dir, "system")
-    os.makedirs(system_dir, exist_ok=True)
-
-    # Determine paths for MCP call
     doc_url = prd_source.get("url", "")
-    cwd = os.path.dirname(project_dir)  # scope-tracker/ root
+    base_dir = os.path.dirname(project_dir)
+    mcp_json_path = os.path.join(base_dir, ".mcp.json")
+
+    # Load credentials
+    try:
+        creds = load_confluence_credentials(mcp_json_path)
+    except RuntimeError as e:
+        print(f"Error loading Confluence credentials: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Extract page ID
+    try:
+        page_id = get_page_id_from_url(doc_url)
+    except ValueError as e:
+        print(f"Error parsing Confluence URL: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Step 1: Fetch metadata
+    print(f"Fetching Confluence metadata for '{project_name}'...", file=sys.stderr)
+    try:
+        meta = fetch_page_metadata(
+            creds["site_name"], creds["email"], creds["api_token"], page_id
+        )
+    except RuntimeError as e:
+        print(f"Error fetching Confluence metadata: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Write metadata file
+    meta_output_path = os.path.join(system_dir, f"{project_name}_prd_meta.json")
+    with open(meta_output_path, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2)
+
+    new_modified = meta.get("modified_time", "")
+
+    # Step 2: Compare to stored modifiedTime
+    stored_modified = run_state.get("prd", {}).get("last_modified", "")
+    if not force and new_modified and new_modified == stored_modified:
+        print("PRD unchanged — skipping.", file=sys.stderr)
+        return {"status": "skipped (unchanged)", "last_modified": stored_modified}
+
+    # Step 3: Fetch full content
+    print(
+        f"PRD changed (was: {stored_modified}, now: {new_modified}). Fetching content...",
+        file=sys.stderr,
+    )
+
+    raw_path = os.path.join(system_dir, f"{project_name}_prd_raw.txt")
+    comments_path = os.path.join(system_dir, f"{project_name}_prd_comments_raw.json")
+
+    try:
+        content = fetch_page_content(
+            creds["site_name"], creds["email"], creds["api_token"], page_id
+        )
+        with open(raw_path, "w", encoding="utf-8") as f:
+            f.write(content)
+    except RuntimeError as e:
+        print(f"Error fetching Confluence content: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        comments = fetch_page_comments(
+            creds["site_name"], creds["email"], creds["api_token"], page_id
+        )
+        with open(comments_path, "w", encoding="utf-8") as f:
+            json.dump(comments, f, indent=2, ensure_ascii=False)
+    except RuntimeError as e:
+        print(f"Error fetching Confluence comments: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    return {
+        "status": "changed",
+        "last_modified": new_modified,
+        "raw_path": raw_path,
+        "comments_path": comments_path,
+    }
+
+
+def _run_google_drive(
+    project_dir: str, project_name: str, prd_source: dict, run_state: dict, force: bool
+) -> dict:
+    """Handle PRD diff for Google Drive sources using LLM calls (MCP).
+
+    Args:
+        project_dir: Absolute path to the project directory.
+        project_name: Name of the project.
+        prd_source: PRD source config dict.
+        run_state: Current run state dict.
+        force: If True, skip mtime comparison.
+
+    Returns:
+        Result dict with status and optional paths.
+    """
+    system_dir = os.path.join(project_dir, "system")
+    doc_url = prd_source.get("url", "")
+    source_type = prd_source.get("type", "google-drive")
+    cwd = os.path.dirname(project_dir)
     prompts_dir = os.path.join(cwd, "prompts")
 
     # Step 1: Fetch metadata to get modifiedTime
@@ -116,15 +211,16 @@ def run(project_dir: str, config_path: str, project_name: str, force: bool = Fal
     new_modified = meta.get("modified_time", "")
 
     # Step 2: Compare to stored modifiedTime
-    run_state = _load_run_state(project_dir, project_name)
     stored_modified = run_state.get("prd", {}).get("last_modified", "")
-
     if not force and new_modified and new_modified == stored_modified:
         print("PRD unchanged — skipping.", file=sys.stderr)
         return {"status": "skipped (unchanged)", "last_modified": stored_modified}
 
     # Step 3: PRD changed — fetch full content
-    print(f"PRD changed (was: {stored_modified}, now: {new_modified}). Fetching content...", file=sys.stderr)
+    print(
+        f"PRD changed (was: {stored_modified}, now: {new_modified}). Fetching content...",
+        file=sys.stderr,
+    )
 
     raw_path = os.path.join(system_dir, f"{project_name}_prd_raw.txt")
     comments_path = os.path.join(system_dir, f"{project_name}_prd_comments_raw.json")
@@ -151,6 +247,42 @@ def run(project_dir: str, config_path: str, project_name: str, force: bool = Fal
         "raw_path": raw_path,
         "comments_path": comments_path,
     }
+
+
+def run(project_dir: str, config_path: str, project_name: str, force: bool = False) -> dict:
+    """Execute the PRD diff check.
+
+    Routes to Confluence direct API or Google Drive LLM path based on source_type.
+
+    Args:
+        project_dir: Path to the project directory.
+        config_path: Path to scope_tracker_config.json.
+        project_name: Name of the project.
+        force: If True, skip mtime comparison and always fetch.
+
+    Returns:
+        Result dict with status and optional paths.
+    """
+    config = _load_config(config_path)
+    project = _find_project(config, project_name)
+    prd_source = project.get("prd_source", {})
+
+    # Check if PRD is configured
+    source_type = prd_source.get("type", "none")
+    if source_type == "none":
+        return {"status": "not configured"}
+
+    project_dir = os.path.expanduser(os.path.abspath(project_dir))
+    system_dir = os.path.join(project_dir, "system")
+    os.makedirs(system_dir, exist_ok=True)
+
+    run_state = _load_run_state(project_dir, project_name)
+
+    if source_type == "confluence":
+        return _run_confluence(project_dir, project_name, prd_source, run_state, force)
+    else:
+        # Google Drive and any other types use LLM path
+        return _run_google_drive(project_dir, project_name, prd_source, run_state, force)
 
 
 def main() -> None:
