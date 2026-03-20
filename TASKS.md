@@ -249,19 +249,37 @@ clear, all MCP configs are written correctly, all folder structures are created.
 
 ---
 
-## Group 12 — Integration Test, Reinstall, and Verify
+## Group 12 — Self-Healing Dependency Management
+**Status: PENDING**
+**Req ref:** Section 14.7
+**Goal:** The tool automatically installs missing Python packages, copies/creates required credential files, and resolves any fixable setup issue without asking the user. Only prompt the user when something genuinely requires their input (e.g. an API token they need to generate).
+
+| # | Task | Status |
+|---|---|---|
+| 12.1 | Write `src/scope_tracker/scripts/dependency_manager.py` — `ensure_python_deps()`: checks if required packages (`google-api-python-client`, `google-auth-oauthlib`, `requests`, `openpyxl`, `click`, `rich`) are importable. If any missing, runs `pip install` automatically. Logs what was installed to stderr. | PENDING |
+| 12.2 | Update `cli.py` — call `ensure_python_deps()` at startup before any command runs. If `pip install` fails, print the exact command the user should run and exit. | PENDING |
+| 12.3 | Update `installer.py init` — after scaffold, auto-copy `client_secret.json` to the scope-tracker directory if the user provides the path (don't just store the path — copy the file so it's self-contained). If the file is already in the directory, skip. | PENDING |
+| 12.4 | Update `cli.py doctor` — for each failed check, if the fix is automatable (e.g. missing Python package → pip install, missing directory → mkdir), offer to fix it automatically. Print what was fixed. Only show manual instructions for things that truly need user action. | PENDING |
+| 12.5 | Handle missing `token.json` gracefully — when Google OAuth token is missing or expired, trigger the consent flow automatically (opens browser). Don't error out with a cryptic message. | PENDING |
+| 12.6 | Handle missing `.mcp.json` keys — if `diff_prd.py` or `diff_slack.py` needs credentials from `.mcp.json` and a key is missing, print exactly which key is missing and how to fix it (e.g. "Run `scope-tracker init` to reconfigure"). | PENDING |
+| 12.7 | Write `tests/test_dependency_manager.py` — (a) missing package triggers pip install; (b) all packages present → no-op; (c) pip failure shows user-friendly message. Mock `importlib` and `subprocess`. | PENDING |
+| 12.8 | All tests pass. | PENDING |
+
+---
+
+## Group 13 — Integration Test, Reinstall, and Verify
 **Status: PENDING**
 **Req ref:** All sections
 **Goal:** Full pipeline works end-to-end with direct API calls. Package reinstalls cleanly. All tests green.
 
 | # | Task | Status |
 |---|---|---|
-| 12.1 | Update `tests/test_e2e.py` — adjust for direct API calls (mock Google Sheets API, mock Confluence/Slack HTTP, mock `call_llm` only for the 3 semantic prompts). | PENDING |
-| 12.2 | Run full test suite: `pytest tests/ -v`. All tests pass. Fix any failures. | PENDING |
-| 12.3 | Push to GitHub. Reinstall from git URL. Verify `scope-tracker --help` works. | PENDING |
-| 12.4 | Run `scope-tracker init-sheet --project basket-test-slack` end-to-end. Verify: (a) Confluence PRD fetched via direct API; (b) Google Sheet created with URL; (c) config updated with sheet_url. | PENDING |
-| 12.5 | Update `CHANGELOG.md` — v1.1.0 entry: "Replaced LLM-as-middleman with direct API calls for Confluence, Slack, Google Sheets, PRD parsing, and report formatting." | PENDING |
-| 12.6 | `git tag v1.1.0` | PENDING |
+| 13.1 | Update `tests/test_e2e.py` — adjust for direct API calls (mock Google Sheets API, mock Confluence/Slack HTTP, mock `call_llm` only for the 3 semantic prompts). | PENDING |
+| 13.2 | Run full test suite: `pytest tests/ -v`. All tests pass. Fix any failures. | PENDING |
+| 13.3 | Push to GitHub. Reinstall from git URL. Verify `scope-tracker --help` works. | PENDING |
+| 13.4 | Run `scope-tracker init-sheet --project basket-test-slack` end-to-end. Verify: (a) Confluence PRD fetched via direct API; (b) Google Sheet created with URL; (c) config updated with sheet_url. | PENDING |
+| 13.5 | Update `CHANGELOG.md` — v1.1.0 entry: "Replaced LLM-as-middleman with direct API calls for Confluence, Slack, Google Sheets, PRD parsing, and report formatting. Added self-healing dependency management." | PENDING |
+| 13.6 | `git tag v1.1.0` | PENDING |
 
 ---
 
@@ -280,4 +298,5 @@ clear, all MCP configs are written correctly, all folder structures are created.
 | 9 | Google Sheets direct API integration | PENDING |
 | 10 | Confluence and Slack direct API clients | PENDING |
 | 11 | PRD parser and Slack reporter (pure Python) | PENDING |
-| 12 | Integration test, reinstall, and verify | PENDING |
+| 12 | Self-healing dependency management | PENDING |
+| 13 | Integration test, reinstall, and verify | PENDING |

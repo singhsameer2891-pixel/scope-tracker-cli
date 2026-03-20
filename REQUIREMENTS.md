@@ -1207,3 +1207,25 @@ Replace `call_llm(slack_report.md)` with Python string formatting and direct Sla
 **Changes:**
 - `run_pipeline.py` Step 5 calls `slack_reporter` instead of `call_llm(slack_report.md)`
 - Delete `slack_report.md` prompt (or keep for reference only)
+
+### 14.7 Self-Healing Dependency Management
+
+The tool must resolve fixable issues automatically without asking the user. Only prompt the user when something genuinely requires their input (e.g. an API token they need to generate from a website).
+
+**Auto-fix on startup:**
+- Missing Python packages → `pip install` automatically, log what was installed
+- Missing directories → create them
+- Missing `token.json` (Google OAuth) → trigger browser consent flow automatically
+- Expired Google OAuth token → refresh automatically (or re-trigger consent if refresh fails)
+
+**Auto-fix during `init`:**
+- When user provides `client_secret.json` path → copy the file into the scope-tracker directory (don't just store the path reference — make the setup self-contained)
+
+**Auto-fix in `doctor`:**
+- For each failed check, if the fix is automatable, fix it and report what was done
+- Only show manual instructions for things that truly need user action (e.g. "Create an API token at id.atlassian.com")
+
+**Graceful error messages:**
+- Missing `.mcp.json` key → print exactly which key is missing and which command to run
+- Failed `pip install` → print the exact `pip install` command the user should try manually
+- Never show raw tracebacks to the user — always a human-readable message with a fix suggestion
