@@ -410,7 +410,7 @@ def run(
 
         try:
             from scope_tracker.scripts.slack_reporter import build_report, post_report
-            from scope_tracker.scripts.slack_client import load_slack_credentials
+            from scope_tracker.scripts.slack_client import load_slack_credentials, resolve_channel_id
 
             report_text = build_report(
                 project_name=project_name,
@@ -420,13 +420,13 @@ def run(
                 pending_conflicts=pending_conflicts,
             )
 
-            # Pass channel name directly to chat.postMessage — no conversations.list needed
+            # Load Slack credentials and resolve channel
             mcp_json_path = os.path.join(base_dir, ".mcp.json")
             slack_creds = load_slack_credentials(mcp_json_path)
             bot_token = slack_creds["bot_token"]
-            channel_ref = reporting_channel if reporting_channel.startswith("#") else f"#{reporting_channel}"
+            channel_id = resolve_channel_id(bot_token, reporting_channel)
 
-            post_report(bot_token, channel_ref, report_text)
+            post_report(bot_token, channel_id, report_text)
         except RuntimeError as e:
             _log(f"Step 5 error: {e}", verbose)
     else:
