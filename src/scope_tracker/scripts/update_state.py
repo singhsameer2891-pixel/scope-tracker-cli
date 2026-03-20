@@ -66,10 +66,15 @@ def _deep_merge_state(existing: dict, updates: dict) -> dict:
             result["slack"] = merged_slack
 
         elif key == "conflicts" and isinstance(value, list):
-            # Merge conflicts by id
+            # Merge conflicts by id — never overwrite a resolved conflict
+            # with an unresolved one (prevents Step 3 re-raising what Step 0 resolved)
             existing_conflicts = {c["id"]: c for c in result.get("conflicts", [])}
             for conflict in value:
-                existing_conflicts[conflict["id"]] = conflict
+                cid = conflict["id"]
+                existing = existing_conflicts.get(cid)
+                if existing and existing.get("resolved") and not conflict.get("resolved"):
+                    continue  # Preserve the resolved state
+                existing_conflicts[cid] = conflict
             result["conflicts"] = list(existing_conflicts.values())
 
         elif key == "prd" and isinstance(value, dict):
