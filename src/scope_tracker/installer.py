@@ -543,6 +543,7 @@ def write_gitignore(base_path: str) -> str:
         "dist/",
         "*.egg-info/",
         "credentials.json",
+        "token.json",
         ".venv/",
     ]
 
@@ -593,6 +594,69 @@ def build_default_config(
     Returns:
         Config dict ready to have projects appended.
     """
+def run_google_sheets_wizard() -> dict[str, str]:
+    """Prompt user for Google Sheets OAuth2 client_secret.json path.
+
+    Validates the file exists and contains a client_id key.
+
+    Returns:
+        Dict with 'client_secret_path' key.
+    """
+    console.print(Panel(
+        "[bold]Google Sheets Configuration[/bold]\n\n"
+        "You need a Google OAuth2 client_secret.json file for Sheets access.\n"
+        "Create one at: [link]https://console.cloud.google.com[/link]\n"
+        "Go to APIs & Services → Credentials → Create OAuth client ID → Desktop app.\n"
+        "Enable the Google Sheets API for your project.\n"
+        "Download the JSON file.",
+        title="Google Sheets Setup",
+    ))
+
+    while True:
+        cred_path = click.prompt(
+            "Path to your Google client_secret.json file", type=str,
+        ).strip()
+        cred_path = os.path.expanduser(os.path.abspath(cred_path))
+
+        if not os.path.isfile(cred_path):
+            console.print(f"[red]File not found: {cred_path}[/red]")
+            continue
+
+        try:
+            with open(cred_path, "r", encoding="utf-8") as f:
+                cred_data = json.load(f)
+            has_client_id = (
+                "client_id" in cred_data
+                or "client_id" in cred_data.get("installed", {})
+                or "client_id" in cred_data.get("web", {})
+            )
+            if not has_client_id:
+                console.print("[red]JSON file does not contain a 'client_id' key. "
+                              "Please provide valid OAuth credentials.[/red]")
+                continue
+            break
+        except json.JSONDecodeError:
+            console.print("[red]File is not valid JSON. Please try again.[/red]")
+            continue
+
+    return {"client_secret_path": cred_path}
+
+
+def build_default_config(
+    reporting_channel: str = "scope-tracker",
+    timezone: str = "Asia/Kolkata",
+    google_sheets_config: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Build a default scope_tracker_config.json structure.
+
+    Args:
+        reporting_channel: Slack channel for run reports.
+        timezone: Default timezone string.
+        google_sheets_config: Google Sheets config dict with client_secret_path.
+
+    Returns:
+        Config dict ready to have projects appended.
+    """
     return {
         "global_settings": {
             "reporting_slack_channel": reporting_channel,
@@ -632,5 +696,6 @@ def build_default_config(
                 "Description",
             ],
         },
+        "google_sheets": google_sheets_config or {},
         "projects": [],
     }

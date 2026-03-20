@@ -89,11 +89,34 @@ call_llm(prompt_file: str, placeholders: dict, cwd: str, timeout: int = 300) -> 
 - Returns stdout on success
 - Raises `RuntimeError` on non-zero exit or timeout
 
+## Google Sheets Direct API
+
+### `google_sheets.py`
+
+**Purpose:** Direct Google Sheets API access using OAuth2. Replaces all LLM-based sheet operations.
+
+**Authentication:** OAuth2 "installed app" flow.
+- First run: reads `client_secret.json`, opens browser for consent, saves `token.json`
+- Subsequent runs: uses saved refresh token (auto-refreshes if expired)
+- Scope: `https://www.googleapis.com/auth/spreadsheets`
+
+**Functions:**
+
+| Function | What it does |
+|---|---|
+| `authenticate(client_secret_path, token_dir)` | OAuth2 auth flow, returns Credentials |
+| `get_sheets_service(client_secret_path, token_path)` | Convenience wrapper, returns (service, creds) |
+| `create_spreadsheet(creds, title, headers, rows, ...)` | Creates new spreadsheet with data + formatting |
+| `read_spreadsheet(creds, spreadsheet_id)` | Reads all rows from Sheet1 |
+| `update_spreadsheet(creds, spreadsheet_id, changes, ...)` | Batch apply add/update/update_cell changes |
+
+**Formatting:** All formatting (column widths, frozen rows/cols, band colors, bold headers, text wrapping, borders, band separators, dropdowns, conditional formatting) is applied via a single `batchUpdate` call for efficiency.
+
 ## Sheet Manager
 
 ### `sheet_manager.py`
 
-**Purpose:** All Google Sheet operations — create, update, format, compute Effective Status, detect conflicts.
+**Purpose:** All Google Sheet operations — create, update, format, compute Effective Status, detect conflicts. Uses `google_sheets.py` for direct API access (no LLM calls for sheet operations).
 
 **Arguments:**
 - `--project-dir` — path to the project directory
@@ -257,6 +280,7 @@ For each row:
 | `run_confluence_mcp_wizard()` | Collects Confluence URL, username, and API token. |
 | `write_mcp_config(base_path, mcp_config)` | Writes `.mcp.json` with configured MCP servers. |
 | `run_project_wizard(existing_mcp_servers)` | Interactive project setup: name, channel, PRD source. |
+| `run_google_sheets_wizard()` | Collects Google OAuth2 client_secret.json path, validates file. |
 | `write_config(base_path, config)` | Writes `scope_tracker_config.json`. |
 | `load_config(config_path)` | Reads and parses config from disk. |
 

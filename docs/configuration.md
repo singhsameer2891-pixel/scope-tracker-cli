@@ -24,6 +24,14 @@ Created by `scope-tracker init`. Located in the `scope-tracker/` directory.
 | `prd_identifier_column_names` | string[] | `["ID", "Identifier", "#", "Ref"]` | Header names the tool uses to find the identifier column in the PRD table. |
 | `prd_story_column_names` | string[] | `["User Story", "Story", "Feature", "Requirement", "Description"]` | Header names the tool uses to find the story/feature column in the PRD table. |
 
+### `google_sheets`
+
+| Field | Type | Description |
+|---|---|---|
+| `client_secret_path` | string | Absolute path to the Google OAuth2 `client_secret.json` file. Set during `scope-tracker init`. Used for direct Google Sheets API access. |
+
+The OAuth2 token (`token.json`) is saved in the `scope-tracker/` directory after the first successful consent flow and is automatically refreshed on subsequent runs. It is gitignored.
+
 ### `projects[]`
 
 Each entry in the `projects` array represents one tracked project.
@@ -50,6 +58,9 @@ Each entry in the `projects` array represents one tracked project.
     "reporting_slack_channel": "scope-tracker",
     "reporting_slack_last_read": null,
     "default_timezone": "Asia/Kolkata"
+  },
+  "google_sheets": {
+    "client_secret_path": "/Users/you/credentials/client_secret.json"
   },
   "sheet_config": {
     "uat_rounds": 5,

@@ -29,6 +29,7 @@ def init() -> None:
         build_default_config,
         check_dependencies,
         create_project_folders,
+        run_google_sheets_wizard,
         run_project_wizard,
         run_slack_mcp_wizard,
         scaffold_directories,
@@ -55,9 +56,13 @@ def init() -> None:
         default="Asia/Kolkata",
     ).strip()
 
+    # Google Sheets OAuth2 setup
+    gs_config = run_google_sheets_wizard()
+
     config = build_default_config(
         reporting_channel=reporting_channel,
         timezone=timezone,
+        google_sheets_config=gs_config,
     )
 
     # Step 9: Slack MCP wizard (always required)
@@ -281,35 +286,33 @@ def init_sheet(project: str) -> None:
         console.print(f"[red]PRD extraction failed:[/red] {exc}")
         raise SystemExit(1)
 
-    # Step 4: Run sheet_manager.py --operation create
+    # Step 4: Create Google Sheet via direct API
     console.print("[bold]Step 3/4:[/bold] Creating Google Sheet...")
+
+    # Verify Google Sheets credentials are configured
+    gs_config = config.get("google_sheets", {})
+    client_secret_path = gs_config.get("client_secret_path", "")
+    if not client_secret_path:
+        console.print("[red]Google Sheets client_secret_path not configured.[/red]")
+        console.print("Run [bold]scope-tracker init[/bold] to configure Google Sheets credentials.")
+        raise SystemExit(1)
+
     try:
-        sheet_result = subprocess.run(
-            [
-                sys.executable,
-                os.path.join(scripts_dir, "sheet_manager.py"),
-                "--project-dir", project_dir,
-                "--config", config_path,
-                "--project", project,
-                "--operation", "create",
-                "--prd-features", features_output_path,
-            ],
-            capture_output=True,
-            text=True,
-            cwd=st_dir,
-            timeout=600,
+        from scope_tracker.scripts.sheet_manager import create_sheet, build_headers
+
+        sheet_output = create_sheet(
+            config=config,
+            project_config=project_config,
+            project_dir=project_dir,
+            prd_features_path=features_output_path,
         )
-        if sheet_result.returncode != 0:
-            console.print(f"[red]sheet_manager.py failed:[/red]\n{sheet_result.stderr}")
-            raise SystemExit(1)
-        sheet_output = json.loads(sheet_result.stdout)
         sheet_url = sheet_output.get("sheet_url", "")
         console.print(f"  Sheet URL: {sheet_url}")
-    except subprocess.TimeoutExpired:
-        console.print("[red]sheet_manager.py timed out.[/red]")
+    except FileNotFoundError as exc:
+        console.print(f"[red]Sheet creation failed:[/red] {exc}")
         raise SystemExit(1)
-    except json.JSONDecodeError:
-        console.print(f"[red]sheet_manager.py returned invalid JSON:[/red]\n{sheet_result.stdout}")
+    except Exception as exc:
+        console.print(f"[red]Sheet creation failed:[/red] {exc}")
         raise SystemExit(1)
 
     # Step 5: Update config with sheet_url

@@ -18,6 +18,12 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 
 from scope_tracker.scripts.call_llm import call_llm
+from scope_tracker.scripts.google_sheets import (
+    authenticate,
+    create_spreadsheet as gs_create_spreadsheet,
+    read_spreadsheet as gs_read_spreadsheet,
+    update_spreadsheet as gs_update_spreadsheet,
+)
 
 
 # IST timezone offset
@@ -260,6 +266,51 @@ def _get_band_separator_indices(headers: list[str]) -> list[int]:
     return separators
 
 
+def _get_google_creds(config: dict, base_dir: str) -> Any:
+    """Get Google OAuth2 credentials from config.
+
+    Reads client_secret_path from config and authenticates via OAuth2.
+    Token is stored in the scope-tracker directory.
+
+    Args:
+        config: Full config dict (must have google_sheets.client_secret_path).
+        base_dir: Base scope-tracker directory (token.json stored here).
+
+    Returns:
+        Authenticated Google OAuth2 Credentials object.
+
+    Raises:
+        FileNotFoundError: If client_secret_path is not set or file missing.
+    """
+    gs_config = config.get("google_sheets", {})
+    client_secret_path = gs_config.get("client_secret_path", "")
+
+    if not client_secret_path:
+        raise FileNotFoundError(
+            "Google Sheets client_secret_path not configured. "
+            "Run 'scope-tracker init' to set it up."
+        )
+
+    client_secret_path = os.path.expanduser(os.path.abspath(client_secret_path))
+    return authenticate(client_secret_path, base_dir)
+
+
+def _extract_spreadsheet_id(sheet_url: str) -> str:
+    """Extract spreadsheet ID from a Google Sheets URL.
+
+    Args:
+        sheet_url: Full Google Sheets URL.
+
+    Returns:
+        The spreadsheet ID string.
+    """
+    # URL format: https://docs.google.com/spreadsheets/d/{id}/...
+    if "/d/" in sheet_url:
+        parts = sheet_url.split("/d/")[1].split("/")
+        return parts[0]
+    return sheet_url  # assume it's already an ID
+
+
 def create_sheet(
     config: dict,
     project_config: dict,
@@ -284,7 +335,6 @@ def create_sheet(
     """
     project_name = project_config["name"]
     base_dir = os.path.dirname(project_dir)
-    prompts_dir = os.path.join(base_dir, "prompts")
     headers = build_headers(config)
 
     # Load PRD features
@@ -319,61 +369,33 @@ def create_sheet(
         eff_col = headers.index("Effective Status")
         sheet_data[row_idx][eff_col] = eff_status
 
-    # Create sheet via LLM using sheet_create prompt
-    # The actual Google Sheets API calls would be made by the LLM via MCP
-    sheet_create_prompt = os.path.join(prompts_dir, "sheet_create.md")
-    payload_path = os.path.join(
-        project_dir, "system", f"{project_name}_sheet_payload.json"
+    # Create sheet via Google Sheets API directly
+    creds = _get_google_creds(config, base_dir)
+
+    formatting_spec = _build_formatting_spec(headers, config)
+    dropdown_spec = _build_dropdown_spec(headers, config)
+    cond_format_spec = _build_conditional_formatting_spec(headers)
+    column_widths = get_column_widths(config)
+
+    _log(f"Creating Google Sheet for project: {project_name}")
+    result = gs_create_spreadsheet(
+        creds=creds,
+        title=f"Scope Tracker — {project_name}",
+        headers=headers,
+        rows=sheet_data[1:],  # exclude header row from data
+        column_widths=column_widths,
+        formatting=formatting_spec,
+        dropdowns=dropdown_spec,
+        conditional_formatting=cond_format_spec,
     )
 
-    # Write payload for the LLM to use
-    payload = {
-        "title": f"Scope Tracker — {project_name}",
-        "headers": headers,
-        "rows": sheet_data[1:],  # exclude header row from data
-        "column_widths": get_column_widths(config),
-        "formatting": _build_formatting_spec(headers, config),
-        "dropdowns": _build_dropdown_spec(headers, config),
-        "conditional_formatting": _build_conditional_formatting_spec(headers),
-    }
-
-    os.makedirs(os.path.dirname(payload_path), exist_ok=True)
-    with open(payload_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2)
-
-    _log(f"Sheet payload written to {payload_path}")
-
-    # Call LLM to create the sheet
-    output_path = os.path.join(
-        project_dir, "system", f"{project_name}_sheet_result.json"
-    )
-
-    try:
-        call_llm(
-            prompt_file=sheet_create_prompt,
-            placeholders={
-                "PAYLOAD_PATH": payload_path,
-                "OUTPUT_PATH": output_path,
-                "PROJECT_NAME": project_name,
-            },
-            cwd=base_dir,
-        )
-    except FileNotFoundError:
-        # sheet_create.md prompt may not exist yet — use direct API approach
-        _log("sheet_create.md not found, using direct payload approach")
-
-    # Read result
-    sheet_url = ""
-    try:
-        with open(output_path, "r", encoding="utf-8") as f:
-            result = json.load(f)
-            sheet_url = result.get("sheet_url", "")
-    except (FileNotFoundError, json.JSONDecodeError):
-        _log("Warning: Could not read sheet creation result")
+    sheet_url = result.get("sheet_url", "")
+    _log(f"Sheet created: {sheet_url}")
 
     return {
         "status": "created",
         "sheet_url": sheet_url,
+        "spreadsheet_id": result.get("spreadsheet_id", ""),
         "rows_added": len(prd_features),
         "total_columns": len(headers),
     }
@@ -404,7 +426,6 @@ def update_sheet(
     """
     project_name = project_config["name"]
     base_dir = os.path.dirname(project_dir)
-    prompts_dir = os.path.join(base_dir, "prompts")
     headers = build_headers(config)
     uat_rounds = config.get("sheet_config", {}).get("uat_rounds", 5)
     run_state = load_run_state(project_dir, project_name)
@@ -413,7 +434,7 @@ def update_sheet(
 
     # Read current sheet data
     sheet_url = project_config.get("sheet_url", "")
-    sheet_rows = read_sheet(project_dir, project_name, base_dir, sheet_url, headers)
+    sheet_rows = read_sheet(config, base_dir, sheet_url, headers)
 
     rows_added = 0
     rows_updated = 0
@@ -510,7 +531,8 @@ def update_sheet(
                     if conflict:
                         new_conflicts.append(conflict)
             else:
-                # Try semantic match via LLM
+                # Try semantic match via LLM (semantic task — LLM required)
+                prompts_dir = os.path.join(base_dir, "prompts")
                 match_result = _try_semantic_match(
                     item, sheet_rows, base_dir, prompts_dir, project_dir, project_config["name"]
                 )
@@ -569,44 +591,28 @@ def update_sheet(
             "value": eff_status,
         })
 
-    # Write changes payload
-    changes_path = os.path.join(
-        project_dir, "system", f"{project_config['name']}_sheet_changes.json"
-    )
-    os.makedirs(os.path.dirname(changes_path), exist_ok=True)
+    # Apply changes via Google Sheets API directly
+    if changes and sheet_url:
+        spreadsheet_id = _extract_spreadsheet_id(sheet_url)
+        creds = _get_google_creds(config, base_dir)
 
-    changes_payload = {
-        "sheet_url": sheet_url,
-        "headers": headers,
-        "changes": changes,
-        "formatting": _build_formatting_spec(headers, config),
-        "dropdowns": _build_dropdown_spec(headers, config),
-        "conditional_formatting": _build_conditional_formatting_spec(headers),
-    }
+        formatting_spec = _build_formatting_spec(headers, config)
+        dropdown_spec = _build_dropdown_spec(headers, config)
+        cond_format_spec = _build_conditional_formatting_spec(headers)
 
-    with open(changes_path, "w", encoding="utf-8") as f:
-        json.dump(changes_payload, f, indent=2)
-
-    _log(f"Sheet changes written to {changes_path}")
-
-    # Call LLM to apply changes
-    sheet_update_prompt = os.path.join(prompts_dir, "sheet_update.md")
-    output_path = os.path.join(
-        project_dir, "system", f"{project_config['name']}_sheet_update_result.json"
-    )
-
-    try:
-        call_llm(
-            prompt_file=sheet_update_prompt,
-            placeholders={
-                "CHANGES_PATH": changes_path,
-                "OUTPUT_PATH": output_path,
-                "SHEET_URL": sheet_url,
-            },
-            cwd=base_dir,
-        )
-    except (FileNotFoundError, RuntimeError) as e:
-        _log(f"Warning: Sheet update LLM call issue: {e}")
+        _log(f"Applying {len(changes)} changes to sheet")
+        try:
+            gs_update_spreadsheet(
+                creds=creds,
+                spreadsheet_id=spreadsheet_id,
+                changes=changes,
+                headers=headers,
+                formatting=formatting_spec,
+                dropdowns=dropdown_spec,
+                conditional_formatting=cond_format_spec,
+            )
+        except Exception as e:
+            _log(f"Warning: Sheet update failed: {e}")
 
     return {
         "status": "updated",
@@ -618,8 +624,7 @@ def update_sheet(
 
 
 def read_sheet(
-    project_dir: str,
-    project_name: str,
+    config: dict,
     base_dir: str,
     sheet_url: str,
     headers: list[str],
@@ -627,53 +632,46 @@ def read_sheet(
     """Read all rows from the Google Sheet into a list of dicts.
 
     Args:
-        project_dir: Path to the project directory.
-        project_name: Project name.
-        base_dir: Base scope-tracker directory (contains .mcp.json).
+        config: Full config dict (needs google_sheets credentials).
+        base_dir: Base scope-tracker directory.
         sheet_url: URL of the Google Sheet.
         headers: Expected column headers.
 
     Returns:
         List of dicts, each keyed by column header name.
     """
-    prompts_dir = os.path.join(base_dir, "prompts")
-    output_path = os.path.join(
-        project_dir, "system", f"{project_name}_sheet_data.json"
-    )
-
-    sheet_read_prompt = os.path.join(prompts_dir, "sheet_read.md")
-
-    try:
-        call_llm(
-            prompt_file=sheet_read_prompt,
-            placeholders={
-                "SHEET_URL": sheet_url,
-                "OUTPUT_PATH": output_path,
-            },
-            cwd=base_dir,
-        )
-    except (FileNotFoundError, RuntimeError) as e:
-        _log(f"Warning: Could not read sheet via LLM: {e}")
+    if not sheet_url:
+        _log("Warning: No sheet URL configured")
         return []
 
+    spreadsheet_id = _extract_spreadsheet_id(sheet_url)
+    creds = _get_google_creds(config, base_dir)
+
+    _log(f"Reading sheet: {spreadsheet_id}")
     try:
-        with open(output_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
+        data = gs_read_spreadsheet(creds=creds, spreadsheet_id=spreadsheet_id)
+    except Exception as e:
+        _log(f"Warning: Could not read sheet: {e}")
         return []
 
-    # Convert raw rows to dicts
-    rows = []
     raw_rows = data.get("rows", [])
-    for raw_row in raw_rows:
+    if not raw_rows:
+        return []
+
+    # First row is headers from the sheet — skip it, use our expected headers
+    data_rows = raw_rows[1:] if len(raw_rows) > 1 else []
+
+    rows = []
+    for raw_row in data_rows:
         if isinstance(raw_row, list):
             row_dict = {}
             for i, val in enumerate(raw_row):
                 if i < len(headers):
-                    row_dict[headers[i]] = val
+                    row_dict[headers[i]] = str(val) if val is not None else ""
+            # Pad missing columns with empty strings
+            for i in range(len(raw_row), len(headers)):
+                row_dict[headers[i]] = ""
             rows.append(row_dict)
-        elif isinstance(raw_row, dict):
-            rows.append(raw_row)
 
     return rows
 
@@ -1205,6 +1203,8 @@ def main() -> None:
     )
     parser.add_argument("--prd-features", default=None, help="Path to PRD features JSON")
     parser.add_argument("--slack-items", default=None, help="Path to Slack items JSON")
+    parser.add_argument("--client-secret", default=None, help="Path to Google OAuth2 client_secret.json")
+    parser.add_argument("--token-path", default=None, help="Path to directory for token.json")
 
     args = parser.parse_args()
 

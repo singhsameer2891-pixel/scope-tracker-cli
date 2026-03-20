@@ -187,26 +187,26 @@ clear, all MCP configs are written correctly, all folder structures are created.
 ---
 
 ## Group 9 — Google Sheets Direct API Integration
-**Status: PENDING**
+**Status: DONE**
 **Req ref:** Section 14.2
 **Goal:** Replace all LLM-based Google Sheet operations with direct `google-api-python-client` calls. After this group, `init-sheet` creates a real Google Sheet with full formatting and returns a sheet URL.
 
 | # | Task | Status |
 |---|---|---|
-| 9.1 | Add `google-auth-oauthlib` to `pyproject.toml` dependencies. Add `token.json` to `.gitignore`. | PENDING |
-| 9.2 | Write `src/scope_tracker/scripts/google_sheets.py` — OAuth2 auth flow (`get_sheets_service`): reads `client_secret.json`, handles first-run browser consent, saves/loads `token.json` for refresh. Scopes: `spreadsheets`. | PENDING |
-| 9.3 | Implement `google_sheets.create_spreadsheet(service, title, headers, rows)` — creates spreadsheet, writes header + data rows, returns `{"sheet_url", "spreadsheet_id"}` | PENDING |
-| 9.4 | Implement `google_sheets.apply_formatting(service, spreadsheet_id, formatting_spec)` — column widths, frozen rows/columns, band colors, bold headers, text wrapping, borders, band separators. Uses `batchUpdate`. | PENDING |
-| 9.5 | Implement `google_sheets.apply_dropdowns(service, spreadsheet_id, dropdown_spec)` — data validation for Scope Decision, Target Version, UAT Status, Blocker columns. | PENDING |
-| 9.6 | Implement `google_sheets.apply_conditional_formatting(service, spreadsheet_id, cond_format_spec)` — Effective Status backgrounds, Active Blocker red, Conflicting Signal orange, Blocker=Yes red. | PENDING |
-| 9.7 | Implement `google_sheets.read_spreadsheet(service, spreadsheet_id)` — read all rows from Sheet1 as list of lists. | PENDING |
-| 9.8 | Implement `google_sheets.update_spreadsheet(service, spreadsheet_id, changes, headers)` — batch apply add/update/update_cell changes. | PENDING |
-| 9.9 | Update `sheet_manager.py` — remove all `call_llm` usage. Use `google_sheets` module for create, read, update. Add `client_secret_path` and `token_path` parameters. | PENDING |
-| 9.10 | Update `cli.py init-sheet` — pass Google credentials paths to sheet_manager. Handle OAuth consent flow (first-run opens browser). | PENDING |
-| 9.11 | Update `installer.py init` — prompt for Google `client_secret.json` path during setup. Store path in config under `google_sheets.client_secret_path`. | PENDING |
-| 9.12 | Write `tests/test_google_sheets.py` — mock Google API: (a) create returns spreadsheet_id and URL; (b) read returns rows; (c) update applies changes; (d) formatting applies without error. | PENDING |
-| 9.13 | All tests pass. Run `scope-tracker init-sheet --project basket-test-slack` and verify sheet URL is returned. | PENDING |
-| 9.14 | Update `docs/configuration.md` and `docs/architecture.md` with Google Sheets direct API details. | PENDING |
+| 9.1 | Add `google-auth-oauthlib` to `pyproject.toml` dependencies. Add `token.json` to `.gitignore`. | DONE |
+| 9.2 | Write `src/scope_tracker/scripts/google_sheets.py` — OAuth2 auth flow (`get_sheets_service`): reads `client_secret.json`, handles first-run browser consent, saves/loads `token.json` for refresh. Scopes: `spreadsheets`. | DONE |
+| 9.3 | Implement `google_sheets.create_spreadsheet(service, title, headers, rows)` — creates spreadsheet, writes header + data rows, returns `{"sheet_url", "spreadsheet_id"}` | DONE |
+| 9.4 | Implement `google_sheets.apply_formatting(service, spreadsheet_id, formatting_spec)` — column widths, frozen rows/columns, band colors, bold headers, text wrapping, borders, band separators. Uses `batchUpdate`. | DONE |
+| 9.5 | Implement `google_sheets.apply_dropdowns(service, spreadsheet_id, dropdown_spec)` — data validation for Scope Decision, Target Version, UAT Status, Blocker columns. | DONE |
+| 9.6 | Implement `google_sheets.apply_conditional_formatting(service, spreadsheet_id, cond_format_spec)` — Effective Status backgrounds, Active Blocker red, Conflicting Signal orange, Blocker=Yes red. | DONE |
+| 9.7 | Implement `google_sheets.read_spreadsheet(service, spreadsheet_id)` — read all rows from Sheet1 as list of lists. | DONE |
+| 9.8 | Implement `google_sheets.update_spreadsheet(service, spreadsheet_id, changes, headers)` — batch apply add/update/update_cell changes. | DONE |
+| 9.9 | Update `sheet_manager.py` — remove all `call_llm` usage. Use `google_sheets` module for create, read, update. Add `client_secret_path` and `token_path` parameters. | DONE |
+| 9.10 | Update `cli.py init-sheet` — pass Google credentials paths to sheet_manager. Handle OAuth consent flow (first-run opens browser). | DONE |
+| 9.11 | Update `installer.py init` — prompt for Google `client_secret.json` path during setup. Store path in config under `google_sheets.client_secret_path`. | DONE |
+| 9.12 | Write `tests/test_google_sheets.py` — mock Google API: (a) create returns spreadsheet_id and URL; (b) read returns rows; (c) update applies changes; (d) formatting applies without error. | DONE |
+| 9.13 | All tests pass. Run `scope-tracker init-sheet --project basket-test-slack` and verify sheet URL is returned. | DONE |
+| 9.14 | Update `docs/configuration.md` and `docs/architecture.md` with Google Sheets direct API details. | DONE |
 
 ---
 
@@ -295,7 +295,7 @@ clear, all MCP configs are written correctly, all folder structures are created.
 | 6 | CLI: init, add, init-sheet commands | DONE |
 | 7 | CLI: run, status, doctor commands + user docs | DONE |
 | 8 | End-to-end test and release | DONE |
-| 9 | Google Sheets direct API integration | PENDING |
+| 9 | Google Sheets direct API integration | DONE |
 | 10 | Confluence and Slack direct API clients | PENDING |
 | 11 | PRD parser and Slack reporter (pure Python) | PENDING |
 | 12 | Self-healing dependency management | PENDING |
