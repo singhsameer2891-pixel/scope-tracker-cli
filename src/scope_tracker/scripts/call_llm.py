@@ -10,6 +10,7 @@ It is not a standalone CLI script.
 
 import os
 import subprocess
+import sys
 from typing import Any
 
 
@@ -18,6 +19,7 @@ def call_llm(
     placeholders: dict[str, Any],
     cwd: str,
     timeout: int = 300,
+    expected_output_files: list[str] | None = None,
 ) -> str:
     """Call claude -p with a prompt template after placeholder substitution.
 
@@ -26,12 +28,15 @@ def call_llm(
         placeholders: Dict of {{KEY}} -> value replacements.
         cwd: Working directory for the subprocess (should contain .mcp.json).
         timeout: Subprocess timeout in seconds. Default 300.
+        expected_output_files: Optional list of file paths that the LLM should create.
+            If provided and any file is missing after the call, raises RuntimeError.
 
     Returns:
         The stdout string from the claude process.
 
     Raises:
-        RuntimeError: If the claude process exits with a non-zero code.
+        RuntimeError: If the claude process exits with a non-zero code,
+            or if expected output files are missing.
         FileNotFoundError: If the prompt file does not exist.
     """
     prompt_path = os.path.expanduser(os.path.abspath(prompt_file))
@@ -68,5 +73,18 @@ def call_llm(
             f"claude -p failed for {prompt_file} (exit {result.returncode}): "
             f"{stderr_snippet}"
         )
+
+    # Log LLM stdout to stderr for debugging
+    if result.stdout:
+        print(f"[call_llm] LLM response (first 500 chars): {result.stdout[:500]}", file=sys.stderr)
+
+    # Verify expected output files were created
+    if expected_output_files:
+        missing = [f for f in expected_output_files if not os.path.exists(f)]
+        if missing:
+            raise RuntimeError(
+                f"claude -p for {prompt_file} exited 0 but did not create expected files: "
+                f"{missing}. LLM stdout: {result.stdout[:500]}"
+            )
 
     return result.stdout

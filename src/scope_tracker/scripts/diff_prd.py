@@ -99,6 +99,7 @@ def run(project_dir: str, config_path: str, project_name: str, force: bool = Fal
                 "OUTPUT_PATH": meta_output_path,
             },
             cwd=cwd,
+            expected_output_files=[meta_output_path],
         )
     except RuntimeError as e:
         print(f"Error fetching PRD metadata: {e}", file=sys.stderr)
@@ -138,6 +139,7 @@ def run(project_dir: str, config_path: str, project_name: str, force: bool = Fal
                 "COMMENTS_OUTPUT_PATH": comments_path,
             },
             cwd=cwd,
+            expected_output_files=[raw_path, comments_path],
         )
     except RuntimeError as e:
         print(f"Error fetching PRD content: {e}", file=sys.stderr)

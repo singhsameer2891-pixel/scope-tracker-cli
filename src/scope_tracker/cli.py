@@ -274,6 +274,7 @@ def init_sheet(project: str) -> None:
             },
             cwd=st_dir,
             timeout=600,
+            expected_output_files=[features_output_path],
         )
         console.print(f"  Features extracted to: {features_output_path}")
     except RuntimeError as exc:
