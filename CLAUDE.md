@@ -92,6 +92,16 @@ Apply these on every file you write or modify.
 - Commit message format: `[Group N] Short description of what was built`
 - Never commit: `.mcp.json` (contains credentials), `*_run_state.json`, `outputs/`, `*.xlsx`
 
+### Auto commit + push after every change
+After **every** code or file change — including bug fixes, hotfixes, and ad-hoc edits outside
+of the normal group workflow — you must:
+1. `git add` the changed files
+2. `git commit` with a descriptive message
+3. `git push origin main`
+4. Confirm to the user with: "Committed and pushed: `<commit message>`"
+
+Do this automatically. Never ask the user to push manually. Never leave changes unpushed.
+
 ---
 
 ## 4. File Structure Reference
