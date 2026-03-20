@@ -388,6 +388,32 @@ After Group 11, the tool uses LLM calls **only for 3 semantic tasks**. Everythin
 | `write_config(base_path, config)` | Writes `scope_tracker_config.json`. |
 | `load_config(config_path)` | Reads and parses config from disk. |
 
+## Self-Healing Dependency Management
+
+`dependency_manager.py` provides automatic resolution of fixable setup issues.
+
+### `ensure_python_deps()`
+
+On every CLI invocation, checks that all required Python packages are importable. If any are missing, runs `pip install` automatically and logs what was installed to stderr. If pip fails, prints the exact command the user should run manually.
+
+### `ensure_directories(st_dir, project_names)`
+
+Creates missing `scripts/`, `prompts/`, and per-project `system/`/`outputs/` directories.
+
+### `ensure_google_oauth_token(config, st_dir)`
+
+Checks for a valid Google OAuth `token.json`. If missing or expired, automatically triggers the browser consent flow or refreshes the token. Never shows cryptic errors — always provides a clear message.
+
+### `doctor --fix`
+
+The `doctor` command identifies auto-fixable issues (missing packages, missing directories, missing OAuth token) and marks them as "Fixable". Running `scope-tracker doctor --fix` auto-resolves them. Manual-only issues (missing API tokens, missing binaries) show clear instructions.
+
+### `init` — client_secret.json copy
+
+During `scope-tracker init`, the `client_secret.json` file is copied into the scope-tracker directory (not just referenced by path) so the setup is self-contained.
+
+---
+
 ## Prompt Files
 
 All prompt files live in `prompts/` and are invoked via `call_llm()` with `{{PLACEHOLDER}}` substitution.

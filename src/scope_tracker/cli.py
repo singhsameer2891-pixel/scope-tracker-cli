@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+from typing import Any
 
 import click
 from rich.console import Console
@@ -20,6 +21,13 @@ console = Console()
 @click.version_option(package_name="scope-tracker")
 def main() -> None:
     """scope-tracker — track project scope and UAT status automatically."""
+    from scope_tracker.scripts.dependency_manager import ensure_python_deps
+
+    try:
+        ensure_python_deps()
+    except SystemExit:
+        # ensure_python_deps already printed the error and pip command
+        raise
 
 
 @main.command()
@@ -58,6 +66,19 @@ def init() -> None:
 
     # Google Sheets OAuth2 setup
     gs_config = run_google_sheets_wizard()
+
+    # Copy client_secret.json into scope-tracker dir for self-contained setup
+    original_path = gs_config.pop("_original_path", "")
+    if original_path:
+        dest_secret = os.path.join(st_dir, "client_secret.json")
+        if not os.path.isfile(dest_secret):
+            import shutil
+            shutil.copy2(original_path, dest_secret)
+            console.print(f"[green]Copied client_secret.json to {dest_secret}[/green]")
+            gs_config["client_secret_path"] = dest_secret
+        elif os.path.abspath(original_path) != os.path.abspath(dest_secret):
+            console.print(f"[dim]client_secret.json already exists in {st_dir}[/dim]")
+            gs_config["client_secret_path"] = dest_secret
 
     config = build_default_config(
         reporting_channel=reporting_channel,
@@ -467,32 +488,56 @@ def status() -> None:
 
 
 @main.command()
-def doctor() -> None:
+@click.option("--fix", is_flag=True, help="Auto-fix issues that can be resolved automatically.")
+def doctor(fix: bool) -> None:
     """Diagnostic check for all dependencies and configuration."""
     from rich.table import Table
+    from scope_tracker.scripts.dependency_manager import (
+        ensure_directories,
+        ensure_python_deps,
+    )
 
     st_dir = _find_scope_tracker_dir()
 
-    checks: list[tuple[str, bool, str]] = []  # (name, passed, detail)
+    # (name, passed, detail, auto_fixable, fix_func)
+    checks: list[tuple[str, bool, str, bool, Any]] = []
+    fixed: list[str] = []
+
+    def _add_check(
+        name: str, passed: bool, detail: str,
+        auto_fixable: bool = False, fix_func: Any = None,
+    ) -> None:
+        checks.append((name, passed, detail, auto_fixable, fix_func))
 
     # 1. python3 >= 3.10
     major, minor = sys.version_info.major, sys.version_info.minor
     py_ok = major >= 3 and minor >= 10
-    checks.append(("python3 >= 3.10", py_ok, f"Python {major}.{minor}.{sys.version_info.micro}"))
+    _add_check("python3 >= 3.10", py_ok, f"Python {major}.{minor}.{sys.version_info.micro}")
 
-    # 2. claude CLI
+    # 2. Python packages (auto-fixable)
+    def _fix_python_deps() -> str:
+        installed = ensure_python_deps()
+        return f"Installed: {', '.join(installed)}" if installed else "All present"
+
+    try:
+        ensure_python_deps()
+        _add_check("Python packages", True, "All required packages importable")
+    except SystemExit:
+        _add_check("Python packages", False, "Missing packages", True, _fix_python_deps)
+
+    # 3. claude CLI
     claude_ok, claude_msg = _check_binary("claude")
-    checks.append(("claude CLI", claude_ok, claude_msg))
+    _add_check("claude CLI", claude_ok, claude_msg)
 
-    # 3. git
+    # 4. git
     git_ok, git_msg = _check_binary("git")
-    checks.append(("git", git_ok, git_msg))
+    _add_check("git", git_ok, git_msg)
 
-    # 4. node/npx
+    # 5. node/npx
     node_ok, node_msg = _check_binary("node")
-    checks.append(("node", node_ok, node_msg))
+    _add_check("node", node_ok, node_msg)
     npx_ok, npx_msg = _check_binary("npx")
-    checks.append(("npx", npx_ok, npx_msg))
+    _add_check("npx", npx_ok, npx_msg)
 
     # Config-level checks (only if scope-tracker dir found)
     if st_dir:
@@ -504,13 +549,13 @@ def doctor() -> None:
                 with open(mcp_path, "r", encoding="utf-8") as f:
                     mcp_data = json.load(f)
             except (json.JSONDecodeError, OSError):
-                checks.append((".mcp.json", False, "File exists but is not valid JSON"))
+                _add_check(".mcp.json", False, "File exists but is not valid JSON")
 
         mcp_servers = mcp_data.get("mcpServers", {})
-        checks.append((".mcp.json exists", os.path.isfile(mcp_path),
-                        mcp_path if os.path.isfile(mcp_path) else "Not found"))
-        checks.append((".mcp.json has 'slack'", "slack" in mcp_servers,
-                        "Present" if "slack" in mcp_servers else "Missing — run 'scope-tracker init'"))
+        _add_check(".mcp.json exists", os.path.isfile(mcp_path),
+                    mcp_path if os.path.isfile(mcp_path) else "Not found — run 'scope-tracker init'")
+        _add_check(".mcp.json has 'slack'", "slack" in mcp_servers,
+                    "Present" if "slack" in mcp_servers else "Missing — run 'scope-tracker init'")
 
         # Load config for project checks
         config_path = os.path.join(st_dir, "scope_tracker_config.json")
@@ -519,7 +564,7 @@ def doctor() -> None:
             with open(config_path, "r", encoding="utf-8") as f:
                 config = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
-            checks.append(("scope_tracker_config.json", False, "Could not read config"))
+            _add_check("scope_tracker_config.json", False, "Could not read config")
 
         projects = config.get("projects", [])
 
@@ -535,13 +580,33 @@ def doctor() -> None:
 
         if needs_gdrive:
             has_gdrive = "gdrive" in mcp_servers
-            checks.append((".mcp.json has 'gdrive'", has_gdrive,
-                            "Present" if has_gdrive else "Missing — a project uses Google Drive"))
+            _add_check(".mcp.json has 'gdrive'", has_gdrive,
+                        "Present" if has_gdrive else "Missing — a project uses Google Drive. Run 'scope-tracker init'.")
 
         if needs_confluence:
             has_conf = "confluence" in mcp_servers
-            checks.append((".mcp.json has 'confluence'", has_conf,
-                            "Present" if has_conf else "Missing — a project uses Confluence"))
+            _add_check(".mcp.json has 'confluence'", has_conf,
+                        "Present" if has_conf else "Missing — a project uses Confluence. Run 'scope-tracker init'.")
+
+        # Google OAuth token check
+        gs_config = config.get("google_sheets", {})
+        client_secret_path = gs_config.get("client_secret_path", "")
+        if client_secret_path:
+            token_path = os.path.join(st_dir, "token.json")
+            token_ok = os.path.isfile(token_path)
+
+            def _fix_oauth_token() -> str:
+                from scope_tracker.scripts.dependency_manager import ensure_google_oauth_token
+                ok = ensure_google_oauth_token(config, st_dir)
+                return "Token created via browser consent" if ok else "Failed to create token"
+
+            _add_check(
+                "Google OAuth token",
+                token_ok,
+                "Present" if token_ok else "Missing — will be created on next Google Sheets operation",
+                auto_fixable=not token_ok,
+                fix_func=_fix_oauth_token if not token_ok else None,
+            )
 
         # Per-project checks
         enabled_projects = [p for p in projects if p.get("enabled", True)]
@@ -549,10 +614,22 @@ def doctor() -> None:
             pname = p["name"]
             pfolder = os.path.join(st_dir, p.get("folder", pname))
 
-            # Folder exists
+            # Folder exists (auto-fixable)
             folder_exists = os.path.isdir(pfolder)
-            checks.append((f"Project '{pname}' folder", folder_exists,
-                            pfolder if folder_exists else f"Missing — run 'scope-tracker add'"))
+
+            def _make_fix_folder(path: str, name: str):
+                def _fix() -> str:
+                    ensure_directories(st_dir, [name])
+                    return f"Created {path}"
+                return _fix
+
+            _add_check(
+                f"Project '{pname}' folder",
+                folder_exists,
+                pfolder if folder_exists else f"Missing",
+                auto_fixable=not folder_exists,
+                fix_func=_make_fix_folder(pfolder, pname) if not folder_exists else None,
+            )
 
             # run_state.json valid
             state_path = os.path.join(pfolder, "system", f"{pname}_run_state.json")
@@ -560,20 +637,31 @@ def doctor() -> None:
                 try:
                     with open(state_path, "r", encoding="utf-8") as f:
                         json.load(f)
-                    checks.append((f"Project '{pname}' run_state.json", True, "Valid JSON"))
+                    _add_check(f"Project '{pname}' run_state.json", True, "Valid JSON")
                 except json.JSONDecodeError:
-                    checks.append((f"Project '{pname}' run_state.json", False, "Invalid JSON"))
+                    _add_check(f"Project '{pname}' run_state.json", False, "Invalid JSON")
             else:
-                checks.append((f"Project '{pname}' run_state.json", True, "Not yet created (first run pending)"))
+                _add_check(f"Project '{pname}' run_state.json", True, "Not yet created (first run pending)")
 
             # sheet_url set
             sheet_url = p.get("sheet_url", "")
             has_sheet = bool(sheet_url)
-            checks.append((f"Project '{pname}' sheet_url", has_sheet,
-                            sheet_url if has_sheet else "Not set — run 'scope-tracker init-sheet'"))
+            _add_check(f"Project '{pname}' sheet_url", has_sheet,
+                        sheet_url if has_sheet else "Not set — run 'scope-tracker init-sheet'")
     else:
-        checks.append(("scope-tracker/ directory", False,
-                        "Not found — run 'scope-tracker init' first"))
+        _add_check("scope-tracker/ directory", False,
+                    "Not found — run 'scope-tracker init' first")
+
+    # Auto-fix pass (if --fix flag provided)
+    if fix:
+        for i, (name, passed, detail, auto_fixable, fix_func) in enumerate(checks):
+            if not passed and auto_fixable and fix_func:
+                try:
+                    result_msg = fix_func()
+                    checks[i] = (name, True, f"Auto-fixed: {result_msg}", False, None)
+                    fixed.append(name)
+                except Exception as e:
+                    checks[i] = (name, False, f"Auto-fix failed: {e}", False, None)
 
     # Print results
     table = Table(title="Doctor — Diagnostic Check")
@@ -582,17 +670,27 @@ def doctor() -> None:
     table.add_column("Details")
 
     any_failed = False
-    for name, passed, detail in checks:
+    any_fixable = False
+    for name, passed, detail, auto_fixable, _ in checks:
         if passed:
             status_str = "[green]✓ Pass[/green]"
         else:
-            status_str = "[red]✗ Fail[/red]"
+            if auto_fixable:
+                status_str = "[yellow]✗ Fixable[/yellow]"
+                any_fixable = True
+            else:
+                status_str = "[red]✗ Fail[/red]"
             any_failed = True
         table.add_row(name, status_str, detail)
 
     console.print(table)
 
+    if fixed:
+        console.print(f"\n[green bold]Auto-fixed {len(fixed)} issue(s): {', '.join(fixed)}[/green bold]")
+
     if any_failed:
+        if any_fixable and not fix:
+            console.print("\n[yellow]Some issues can be auto-fixed. Run: scope-tracker doctor --fix[/yellow]")
         console.print("\n[red bold]Some checks failed. See details above.[/red bold]")
         raise SystemExit(1)
     else:

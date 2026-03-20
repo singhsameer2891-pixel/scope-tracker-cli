@@ -639,7 +639,7 @@ def run_google_sheets_wizard() -> dict[str, str]:
             console.print("[red]File is not valid JSON. Please try again.[/red]")
             continue
 
-    return {"client_secret_path": cred_path}
+    return {"client_secret_path": cred_path, "_original_path": cred_path}
 
 
 def build_default_config(
