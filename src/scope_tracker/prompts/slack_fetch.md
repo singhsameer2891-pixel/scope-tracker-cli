@@ -1,3 +1,4 @@
+# DEPRECATED — Replaced by slack_client.py (direct API) in v1.1.0
 # Slack Fetch — Retrieve New Messages
 # Purpose: Fetch new Slack messages after watermark and re-read threads with new replies.
 # Inputs: CHANNEL, WATERMARK_TS, SEEN_THREAD_IDS, OUTPUT_PATH

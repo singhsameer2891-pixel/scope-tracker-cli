@@ -247,9 +247,9 @@ def init_sheet(project: str) -> None:
         console.print(f"[red]diff_prd.py returned invalid JSON:[/red]\n{diff_result.stdout}")
         raise SystemExit(1)
 
-    # Step 3: Run prd_extract via call_llm
+    # Step 3: Extract features using pure Python parser
     console.print("[bold]Step 2/4:[/bold] Extracting user stories from PRD...")
-    from scope_tracker.scripts.call_llm import call_llm
+    from scope_tracker.scripts.prd_parser import extract_features
 
     import datetime
     date_str = datetime.date.today().isoformat()
@@ -257,32 +257,34 @@ def init_sheet(project: str) -> None:
     comments_path = diff_output.get("comments_path", os.path.join(system_dir, f"{project}_prd_comments_raw.json"))
     features_output_path = os.path.join(system_dir, f"{project}_prd_features_{date_str}.json")
 
-    prompts_dir = os.path.join(st_dir, "prompts")
-    prd_extract_prompt = os.path.join(prompts_dir, "prd_extract.md")
-
-    identifier_cols = json.dumps(
-        config.get("sheet_config", {}).get("prd_identifier_column_names", ["ID", "Identifier", "#", "Ref"])
-    )
-    story_cols = json.dumps(
-        config.get("sheet_config", {}).get("prd_story_column_names", ["User Story", "Story", "Feature", "Requirement", "Description"])
-    )
+    sheet_config = config.get("sheet_config", {})
+    identifier_col_names = sheet_config.get("prd_identifier_column_names", ["ID", "Identifier", "#", "Ref"])
+    story_col_names = sheet_config.get("prd_story_column_names", ["User Story", "Story", "Feature", "Requirement", "Description"])
 
     try:
-        call_llm(
-            prompt_file=prd_extract_prompt,
-            placeholders={
-                "RAW_CONTENT_PATH": raw_path,
-                "COMMENTS_RAW_PATH": comments_path,
-                "OUTPUT_PATH": features_output_path,
-                "IDENTIFIER_COLUMN_NAMES": identifier_cols,
-                "STORY_COLUMN_NAMES": story_cols,
-            },
-            cwd=st_dir,
-            timeout=600,
-            expected_output_files=[features_output_path],
-        )
-        console.print(f"  Features extracted to: {features_output_path}")
-    except RuntimeError as exc:
+        # Read raw PRD text
+        with open(raw_path, "r", encoding="utf-8") as f:
+            raw_text = f.read()
+
+        # Read comments (may not exist)
+        comments: list = []
+        try:
+            with open(comments_path, "r", encoding="utf-8") as f:
+                comments = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+
+        features = extract_features(raw_text, comments, identifier_col_names, story_col_names)
+
+        # Write features JSON
+        with open(features_output_path, "w", encoding="utf-8") as f:
+            json.dump(features, f, indent=2)
+
+        console.print(f"  Extracted {len(features)} features to: {features_output_path}")
+    except FileNotFoundError as exc:
+        console.print(f"[red]PRD extraction failed:[/red] {exc}")
+        raise SystemExit(1)
+    except Exception as exc:
         console.print(f"[red]PRD extraction failed:[/red] {exc}")
         raise SystemExit(1)
 

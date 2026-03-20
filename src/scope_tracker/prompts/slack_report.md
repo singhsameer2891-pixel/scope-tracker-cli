@@ -1,3 +1,4 @@
+# DEPRECATED — Replaced by slack_reporter.py (pure Python) in v1.1.0
 # Slack Report — Post Run Summary
 # Purpose: Post a formatted run completion report to the reporting Slack channel.
 # Inputs: REPORTING_CHANNEL, STEPS_EXECUTED_PATH, RUN_SUMMARY_JSON, PENDING_CONFLICTS_JSON, PROJECT_NAME, RUN_DATETIME

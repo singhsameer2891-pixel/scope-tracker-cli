@@ -230,22 +230,22 @@ clear, all MCP configs are written correctly, all folder structures are created.
 ---
 
 ## Group 11 — PRD Parser and Slack Reporter (Pure Python)
-**Status: PENDING**
+**Status: DONE**
 **Req ref:** Sections 14.5, 14.6
 **Goal:** Replace LLM-based PRD extraction and Slack report formatting with pure Python. After this group, the only `call_llm` usages remaining are the 3 semantic tasks: `slack_classify.md`, `slack_match.md`, `conflict_resolve.md`.
 
 | # | Task | Status |
 |---|---|---|
-| 11.1 | Write `src/scope_tracker/scripts/prd_parser.py` — `extract_features(raw_text, comments, identifier_col_names, story_col_names)`. Logic: find "User Stories" heading (case-insensitive), parse tables, match columns by header name, filter by identifier regex, build feature dicts, attach comments, derive latest_comment_decision. | PENDING |
-| 11.2 | Write `tests/test_prd_parser.py` — (a) extracts features from markdown table with valid IDs; (b) skips rows with non-numeric IDs; (c) returns empty list when no "User Stories" section; (d) attaches comments correctly; (e) handles multiple tables (only extracts from User Stories section); (f) handles pipe-delimited and whitespace-delimited tables. | PENDING |
-| 11.3 | Update `cli.py init-sheet` — call `prd_parser.extract_features()` instead of `call_llm(prd_extract.md)`. Write features JSON from Python. | PENDING |
-| 11.4 | Update `run_pipeline.py` Step 2a — call `prd_parser.extract_features()` instead of `call_llm(prd_extract.md)`. | PENDING |
-| 11.5 | Write `src/scope_tracker/scripts/slack_reporter.py` — `build_report(project_name, run_datetime, steps_executed, run_summary, pending_conflicts)` returns formatted Slack message string. `post_report(bot_token, channel_id, report_text)` posts via Slack API. | PENDING |
-| 11.6 | Write `tests/test_slack_reporter.py` — (a) report includes project name and run date; (b) omits conflict section when count=0; (c) includes each conflict as bullet when count>0; (d) post_report calls Slack API. Mock `requests`. | PENDING |
-| 11.7 | Update `run_pipeline.py` Step 5 — call `slack_reporter` instead of `call_llm(slack_report.md)`. Read `SLACK_BOT_TOKEN` from `.mcp.json`. | PENDING |
-| 11.8 | Audit: grep for all remaining `call_llm` usages. Confirm only 3 remain: `slack_classify.md`, `slack_match.md`, `conflict_resolve.md`. Remove unused prompt files or mark as deprecated. | PENDING |
-| 11.9 | All tests pass. | PENDING |
-| 11.10 | Update `docs/architecture.md` — reflect final LLM vs Python split. Update `README.md` if needed. | PENDING |
+| 11.1 | Write `src/scope_tracker/scripts/prd_parser.py` — `extract_features(raw_text, comments, identifier_col_names, story_col_names)`. Logic: find "User Stories" heading (case-insensitive), parse tables, match columns by header name, filter by identifier regex, build feature dicts, attach comments, derive latest_comment_decision. | DONE |
+| 11.2 | Write `tests/test_prd_parser.py` — (a) extracts features from markdown table with valid IDs; (b) skips rows with non-numeric IDs; (c) returns empty list when no "User Stories" section; (d) attaches comments correctly; (e) handles multiple tables (only extracts from User Stories section); (f) handles pipe-delimited and whitespace-delimited tables. | DONE |
+| 11.3 | Update `cli.py init-sheet` — call `prd_parser.extract_features()` instead of `call_llm(prd_extract.md)`. Write features JSON from Python. | DONE |
+| 11.4 | Update `run_pipeline.py` Step 2a — call `prd_parser.extract_features()` instead of `call_llm(prd_extract.md)`. | DONE |
+| 11.5 | Write `src/scope_tracker/scripts/slack_reporter.py` — `build_report(project_name, run_datetime, steps_executed, run_summary, pending_conflicts)` returns formatted Slack message string. `post_report(bot_token, channel_id, report_text)` posts via Slack API. | DONE |
+| 11.6 | Write `tests/test_slack_reporter.py` — (a) report includes project name and run date; (b) omits conflict section when count=0; (c) includes each conflict as bullet when count>0; (d) post_report calls Slack API. Mock `requests`. | DONE |
+| 11.7 | Update `run_pipeline.py` Step 5 — call `slack_reporter` instead of `call_llm(slack_report.md)`. Read `SLACK_BOT_TOKEN` from `.mcp.json`. | DONE |
+| 11.8 | Audit: grep for all remaining `call_llm` usages. Confirm only 3 remain: `slack_classify.md`, `slack_match.md`, `conflict_resolve.md`. Remove unused prompt files or mark as deprecated. | DONE |
+| 11.9 | All tests pass. | DONE |
+| 11.10 | Update `docs/architecture.md` — reflect final LLM vs Python split. Update `README.md` if needed. | DONE |
 
 ---
 
@@ -297,6 +297,6 @@ clear, all MCP configs are written correctly, all folder structures are created.
 | 8 | End-to-end test and release | DONE |
 | 9 | Google Sheets direct API integration | DONE |
 | 10 | Confluence and Slack direct API clients | DONE |
-| 11 | PRD parser and Slack reporter (pure Python) | PENDING |
+| 11 | PRD parser and Slack reporter (pure Python) | DONE |
 | 12 | Self-healing dependency management | PENDING |
 | 13 | Integration test, reinstall, and verify | PENDING |

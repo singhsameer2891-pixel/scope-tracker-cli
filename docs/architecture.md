@@ -102,6 +102,40 @@ These scripts gate whether downstream processing is needed by checking if source
 
 **Credentials:** `SLACK_BOT_TOKEN` from `.mcp.json`.
 
+## Pure Python Replacements
+
+### `prd_parser.py`
+
+**Purpose:** Deterministic PRD feature extraction — replaces the LLM-based `prd_extract.md` prompt.
+
+**Function:**
+```python
+extract_features(raw_text, comments, identifier_col_names, story_col_names) -> list[dict]
+```
+
+**Logic:**
+1. Find "User Stories" section heading (case-insensitive regex).
+2. Parse all pipe-delimited markdown tables within that section.
+3. Match header columns against `identifier_col_names` and `story_col_names` (case-insensitive).
+4. Filter rows by identifier regex: `^\d+(\.\d+)*$`.
+5. Build feature dicts: `source_id`, `identifier`, `feature_name` (truncated 80 chars), `description`, `source_text`.
+6. Attach comments by matching `anchor_text` to story text.
+7. Derive `latest_comment_decision` from most recent comment keywords.
+8. Return list of feature dicts + `skipped_rows` in first element.
+
+### `slack_reporter.py`
+
+**Purpose:** Build and post Slack run reports — replaces the LLM-based `slack_report.md` prompt.
+
+**Functions:**
+
+| Function | What it does |
+|---|---|
+| `build_report(project_name, run_datetime, steps_executed, run_summary, pending_conflicts)` | Returns formatted Slack mrkdwn message string |
+| `post_report(bot_token, channel_id, report_text)` | Posts message to Slack via `chat.postMessage` API |
+
+**Report format:** Header with project name and date, code block with PRD/Slack/Sheet/Steps summary, optional "Awaiting Your Input" section for pending conflicts.
+
 ## State Management
 
 ### `update_state.py`
@@ -277,11 +311,11 @@ For each row:
 |---|---|---|---|---|
 | 0 | Conflict Resolution | Python (direct Slack API + LLM) | Always runs | `conflict_manager.py` |
 | 1 (a+b) | Source Diff Checks | Python (direct API) (parallel) | Always runs | `diff_prd.py` + `diff_slack.py` via `ThreadPoolExecutor` |
-| 2a | PRD Extraction | LLM call | Only if `diff_prd` returned "changed" | `claude -p prd_extract.md` |
+| 2a | PRD Extraction | Python (pure) | Only if `diff_prd` returned "changed" | `prd_parser.extract_features()` |
 | 2b | Slack Classification | LLM call | Only if `diff_slack` returned "changed" | `claude -p slack_classify.md` |
 | 3 | Sheet Update | Python (direct Google Sheets API) | Always runs (skipped in dry-run) | `sheet_manager.py --operation update` |
 | 4 | State Update | Python script | Always runs | `update_state.py` |
-| 5 | Slack Report | LLM call | Always runs (skipped in dry-run) | `claude -p slack_report.md` |
+| 5 | Slack Report | Python (direct Slack API) | Always runs (skipped in dry-run) | `slack_reporter.build_report()` + `post_report()` |
 
 **Total steps:** 6 (steps 1a+1b count as one parallel step, steps 2a+2b count as one extraction step).
 
@@ -291,19 +325,19 @@ For each row:
 
 ## LLM vs Direct API Split
 
-After Group 10, the tool uses this split:
+After Group 11, the tool uses LLM calls **only for 3 semantic tasks**. Everything else is deterministic Python:
 
 | Task | Method | Reason |
 |---|---|---|
 | Confluence metadata/content/comments | Direct REST API (`confluence_client.py`) | Deterministic fetch |
 | Slack channel history/thread replies | Direct Slack API (`slack_client.py`) | Deterministic fetch |
 | Google Sheet create/read/update | Direct Sheets API (`google_sheets.py`) | Deterministic CRUD |
-| PRD feature extraction | LLM (`prd_extract.md`) | Semantic parsing of tables |
-| Slack classification | LLM (`slack_classify.md`) | Semantic classification |
-| Slack-to-sheet matching | LLM (`slack_match.md`) | Semantic matching |
-| Conflict resolution parsing | LLM (`conflict_resolve.md`) | Semantic interpretation |
-| Slack report posting | LLM (`slack_report.md`) | Formatting + API call |
-| Google Drive metadata/content | LLM via MCP (`prd_fetch_meta.md`, `prd_fetch_content.md`) | Requires GDrive MCP |
+| PRD feature extraction | Python (`prd_parser.py`) | Deterministic table parsing |
+| Slack report posting | Python (`slack_reporter.py`) + Direct Slack API | Deterministic template formatting |
+| Slack classification | **LLM** (`slack_classify.md`) | Semantic classification |
+| Slack-to-sheet matching | **LLM** (`slack_match.md`) | Semantic matching |
+| Conflict resolution parsing | **LLM** (`conflict_resolve.md`) | Semantic interpretation |
+| Google Drive metadata/content | LLM via MCP (`prd_fetch_meta.md`, `prd_fetch_content.md`) | Requires GDrive MCP (no direct API yet) |
 
 ## Runner Module
 
@@ -362,9 +396,9 @@ All prompt files live in `prompts/` and are invoked via `call_llm()` with `{{PLA
 |---|---|---|---|---|
 | `prd_fetch_meta.md` | Fetch document last-modified timestamp only (Google Drive only) | gdrive | `DOC_URL`, `SOURCE_TYPE`, `OUTPUT_PATH` | JSON file: `{"modified_time": "..."}` |
 | `prd_fetch_content.md` | Fetch full document text and inline comments (Google Drive only) | gdrive | `DOC_URL`, `SOURCE_TYPE`, `CONTENT_OUTPUT_PATH`, `COMMENTS_OUTPUT_PATH` | Plain text file + JSON comment array |
-| `prd_extract.md` | Parse raw PRD, extract User Stories table rows with valid numeric IDs | None (file in/out) | `RAW_CONTENT_PATH`, `COMMENTS_RAW_PATH`, `OUTPUT_PATH`, `IDENTIFIER_COLUMN_NAMES`, `STORY_COLUMN_NAMES` | JSON array of feature objects |
+| `prd_extract.md` | *(Deprecated — replaced by `prd_parser.py`)* | None | `RAW_CONTENT_PATH`, `COMMENTS_RAW_PATH`, `OUTPUT_PATH`, `IDENTIFIER_COLUMN_NAMES`, `STORY_COLUMN_NAMES` | JSON array of feature objects |
 | `slack_fetch.md` | *(Deprecated — replaced by `slack_client.py`)* | Slack | `CHANNEL`, `WATERMARK_TS`, `SEEN_THREAD_IDS`, `OUTPUT_PATH` | JSON file with threads and messages |
 | `slack_classify.md` | Classify scope-relevant threads from raw Slack data | None (file in/out) | `RAW_SLACK_PATH`, `OUTPUT_PATH` | JSON array of classified scope items |
 | `slack_match.md` | Semantically match one Slack item to existing sheet rows | None | `SLACK_ITEM_JSON`, `EXISTING_ROWS_JSON`, `OUTPUT_PATH` | JSON with match result and confidence |
 | `conflict_resolve.md` | Parse user's Slack reply to determine conflict resolution | None | `CONFLICT_JSON`, `REPLY_TEXT`, `OUTPUT_PATH` | JSON with resolution details |
-| `slack_report.md` | Post run summary to reporting Slack channel | Slack | `REPORTING_CHANNEL`, `STEPS_EXECUTED_PATH`, `RUN_SUMMARY_JSON`, `PENDING_CONFLICTS_JSON`, `PROJECT_NAME`, `RUN_DATETIME` | Posts Slack message (no file output) |
+| `slack_report.md` | *(Deprecated — replaced by `slack_reporter.py`)* | Slack | `REPORTING_CHANNEL`, `STEPS_EXECUTED_PATH`, `RUN_SUMMARY_JSON`, `PENDING_CONFLICTS_JSON`, `PROJECT_NAME`, `RUN_DATETIME` | Posts Slack message (no file output) |

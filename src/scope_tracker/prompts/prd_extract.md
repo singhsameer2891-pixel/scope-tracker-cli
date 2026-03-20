@@ -1,3 +1,4 @@
+# DEPRECATED — Replaced by prd_parser.py (pure Python) in v1.1.0
 # PRD Extract — User Story Extraction
 # Purpose: Parse raw PRD text, extract User Stories table rows with valid numeric IDs.
 # Inputs: RAW_CONTENT_PATH, COMMENTS_RAW_PATH, OUTPUT_PATH, IDENTIFIER_COLUMN_NAMES, STORY_COLUMN_NAMES

@@ -201,7 +201,7 @@ def run(
 
     prd_features_path = None
     if prd_changed:
-        _log("Step 2a: PRD extraction...", verbose)
+        _log("Step 2a: PRD extraction (pure Python)...", verbose)
         raw_path = prd_result.get("raw_path", "")
         comments_path = prd_result.get("comments_path", "")
         date_str = datetime.now(IST).strftime("%Y-%m-%d")
@@ -209,33 +209,36 @@ def run(
             system_dir, f"{project_name}_prd_features_{date_str}.json"
         )
 
-        identifier_cols = json.dumps(
-            sheet_config.get("prd_identifier_column_names", ["ID", "Identifier", "#", "Ref"])
+        identifier_col_names = sheet_config.get(
+            "prd_identifier_column_names", ["ID", "Identifier", "#", "Ref"]
         )
-        story_cols = json.dumps(
-            sheet_config.get("prd_story_column_names", ["User Story", "Story", "Feature", "Requirement", "Description"])
+        story_col_names = sheet_config.get(
+            "prd_story_column_names", ["User Story", "Story", "Feature", "Requirement", "Description"]
         )
 
         try:
-            call_llm(
-                prompt_file=os.path.join(prompts_dir, "prd_extract.md"),
-                placeholders={
-                    "RAW_CONTENT_PATH": raw_path,
-                    "COMMENTS_RAW_PATH": comments_path,
-                    "OUTPUT_PATH": prd_features_path,
-                    "IDENTIFIER_COLUMN_NAMES": identifier_cols,
-                    "STORY_COLUMN_NAMES": story_cols,
-                },
-                cwd=base_dir,
-            )
-            # Count features
+            from scope_tracker.scripts.prd_parser import extract_features
+
+            # Read raw PRD text
+            with open(raw_path, "r", encoding="utf-8") as f:
+                raw_text = f.read()
+
+            # Read comments (may not exist)
+            comments: list = []
             try:
-                with open(prd_features_path, "r", encoding="utf-8") as f:
-                    features = json.load(f)
-                run_summary["prd_feature_count"] = len(features)
+                with open(comments_path, "r", encoding="utf-8") as f:
+                    comments = json.load(f)
             except (FileNotFoundError, json.JSONDecodeError):
                 pass
-        except RuntimeError as e:
+
+            features = extract_features(raw_text, comments, identifier_col_names, story_col_names)
+
+            # Write features JSON
+            with open(prd_features_path, "w", encoding="utf-8") as f:
+                json.dump(features, f, indent=2)
+
+            run_summary["prd_feature_count"] = len(features)
+        except Exception as e:
             _log(f"Step 2a error: {e}", verbose)
             prd_features_path = None
     else:
@@ -405,28 +408,25 @@ def run(
             c for c in run_state.get("conflicts", []) if not c.get("resolved", False)
         ]
 
-        steps_executed_path = os.path.join(
-            system_dir, f"{project_name}_steps_executed.json"
-        )
-        pending_conflicts_path = os.path.join(
-            system_dir, f"{project_name}_pending_conflicts.json"
-        )
-        with open(pending_conflicts_path, "w", encoding="utf-8") as f:
-            json.dump(pending_conflicts, f, indent=2)
-
         try:
-            call_llm(
-                prompt_file=os.path.join(prompts_dir, "slack_report.md"),
-                placeholders={
-                    "REPORTING_CHANNEL": reporting_channel,
-                    "STEPS_EXECUTED_PATH": steps_executed_path,
-                    "RUN_SUMMARY_JSON": json.dumps(run_summary),
-                    "PENDING_CONFLICTS_JSON": pending_conflicts_path,
-                    "PROJECT_NAME": project_name,
-                    "RUN_DATETIME": run_datetime,
-                },
-                cwd=base_dir,
+            from scope_tracker.scripts.slack_reporter import build_report, post_report
+            from scope_tracker.scripts.slack_client import load_slack_credentials, resolve_channel_id
+
+            report_text = build_report(
+                project_name=project_name,
+                run_datetime=run_datetime,
+                steps_executed=steps_executed,
+                run_summary=run_summary,
+                pending_conflicts=pending_conflicts,
             )
+
+            # Load Slack credentials and resolve channel
+            mcp_json_path = os.path.join(base_dir, ".mcp.json")
+            slack_creds = load_slack_credentials(mcp_json_path)
+            bot_token = slack_creds["bot_token"]
+            channel_id = resolve_channel_id(bot_token, reporting_channel)
+
+            post_report(bot_token, channel_id, report_text)
         except RuntimeError as e:
             _log(f"Step 5 error: {e}", verbose)
     else:
