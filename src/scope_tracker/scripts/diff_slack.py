@@ -162,12 +162,14 @@ def run(project_dir: str, config_path: str, project_name: str) -> dict:
                 )
 
     threads_list = list(threads_map.values())
-    new_count = len(messages)
+    new_top_level_count = len(messages)
+    # Count total messages across all threads (including new replies to seen threads)
+    total_message_count = sum(len(t["messages"]) for t in threads_list)
 
     # Write raw output
     raw_path = os.path.join(system_dir, f"{project_name}_slack_raw.json")
     slack_data = {
-        "new_message_count": new_count,
+        "new_message_count": total_message_count,
         "threads": threads_list,
         "latest_ts": messages[0].get("ts", watermark_ts) if messages else watermark_ts,
     }
@@ -179,14 +181,14 @@ def run(project_dir: str, config_path: str, project_name: str) -> dict:
         print(f"Error writing Slack raw output: {e}", file=sys.stderr)
         sys.exit(1)
 
-    if new_count == 0:
+    if total_message_count == 0:
         print("No new Slack messages — skipping.", file=sys.stderr)
         return {"status": "skipped (no new messages)"}
 
-    print(f"Found {new_count} new Slack message(s).", file=sys.stderr)
+    print(f"Found {total_message_count} new Slack message(s) ({new_top_level_count} top-level, {total_message_count - new_top_level_count} thread replies).", file=sys.stderr)
     return {
         "status": "changed",
-        "new_message_count": new_count,
+        "new_message_count": total_message_count,
         "raw_path": raw_path,
     }
 
