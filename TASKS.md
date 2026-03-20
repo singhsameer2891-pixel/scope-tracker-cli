@@ -268,7 +268,7 @@ clear, all MCP configs are written correctly, all folder structures are created.
 ---
 
 ## Group 13 — Integration Test, Reinstall, and Verify
-**Status: PENDING**
+**Status: DONE**
 **Req ref:** All sections
 **Goal:** Full pipeline works end-to-end with direct API calls. Package reinstalls cleanly. All tests green.
 
@@ -279,7 +279,7 @@ clear, all MCP configs are written correctly, all folder structures are created.
 | 13.3 | Push to GitHub. Reinstall from git URL. Verify `scope-tracker --help` works. | DONE |
 | 13.4 | Run `scope-tracker init-sheet --project basket-test-slack` end-to-end. Verify: (a) Confluence PRD fetched via direct API; (b) Google Sheet created with URL; (c) config updated with sheet_url. | DONE |
 | 13.5 | Update `CHANGELOG.md` — v1.1.0 entry: "Replaced LLM-as-middleman with direct API calls for Confluence, Slack, Google Sheets, PRD parsing, and report formatting. Added self-healing dependency management." | DONE |
-| 13.6 | `git tag v1.1.0` | PENDING |
+| 13.6 | `git tag v1.1.0` | DONE |
 
 ---
 
@@ -299,4 +299,4 @@ clear, all MCP configs are written correctly, all folder structures are created.
 | 10 | Confluence and Slack direct API clients | DONE |
 | 11 | PRD parser and Slack reporter (pure Python) | DONE |
 | 12 | Self-healing dependency management | DONE |
-| 13 | Integration test, reinstall, and verify | PENDING |
+| 13 | Integration test, reinstall, and verify | DONE |
