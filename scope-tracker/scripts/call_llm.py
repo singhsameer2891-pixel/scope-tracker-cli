@@ -47,7 +47,7 @@ def call_llm(
 
     try:
         result = subprocess.run(
-            ["claude", "-p", prompt, "--dangerouslySkipPermissions"],
+            ["claude", "-p", prompt, "--dangerously-skip-permissions"],
             cwd=cwd,
             capture_output=True,
             text=True,
