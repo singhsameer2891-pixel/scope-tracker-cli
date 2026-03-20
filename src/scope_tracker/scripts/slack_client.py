@@ -191,6 +191,54 @@ def fetch_thread_replies(
     return all_messages
 
 
+def fetch_user_display_name(bot_token: str, user_id: str) -> str:
+    """Fetch a Slack user's display name by user ID.
+
+    Args:
+        bot_token: Slack bot token.
+        user_id: Slack user ID (e.g. 'U01ABC123').
+
+    Returns:
+        Display name string, or user_id if lookup fails.
+    """
+    if not user_id:
+        return "Unknown"
+    try:
+        data = _slack_api(bot_token, "users.info", {"user": user_id})
+        profile = data.get("user", {}).get("profile", {})
+        name = (
+            profile.get("display_name")
+            or profile.get("real_name")
+            or data.get("user", {}).get("name")
+            or user_id
+        )
+        return name
+    except RuntimeError:
+        return user_id
+
+
+def get_message_permalink(bot_token: str, channel_id: str, message_ts: str) -> str:
+    """Get the permalink URL for a Slack message.
+
+    Args:
+        bot_token: Slack bot token.
+        channel_id: Slack channel ID.
+        message_ts: Message timestamp string.
+
+    Returns:
+        Permalink URL string, or empty string if lookup fails.
+    """
+    if not channel_id or not message_ts:
+        return ""
+    try:
+        data = _slack_api(
+            bot_token, "chat.getPermalink", {"channel": channel_id, "message_ts": message_ts}
+        )
+        return data.get("permalink", "")
+    except RuntimeError:
+        return ""
+
+
 def load_slack_credentials(mcp_json_path: str) -> dict[str, str]:
     """Load Slack credentials from .mcp.json.
 

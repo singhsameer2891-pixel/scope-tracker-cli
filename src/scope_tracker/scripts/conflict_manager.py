@@ -25,6 +25,8 @@ from datetime import datetime, timezone, timedelta
 from scope_tracker.scripts.call_llm import call_llm
 from scope_tracker.scripts.slack_client import (
     fetch_thread_replies,
+    fetch_user_display_name,
+    get_message_permalink,
     load_slack_credentials,
     resolve_channel_id,
 )
@@ -243,12 +245,15 @@ def run(project_dir: str, config_path: str, project_name: str) -> dict:
             _log(f"Conflict {conflict_id}: error checking replies: {e}")
             continue
 
-        # Find reply (skip the original message, look for responses)
+        # Find reply (skip the original message, take the latest reply)
         reply_text = None
+        reply_user_id = None
+        reply_ts = None
         for msg in replies:
             if msg.get("ts") != slack_message_ts:
-                # This is a reply, take the latest one
                 reply_text = msg.get("text", "")
+                reply_user_id = msg.get("user", "")
+                reply_ts = msg.get("ts", "")
 
         if not reply_text:
             _log(f"Conflict {conflict_id}: no reply found yet.")
@@ -288,13 +293,19 @@ def run(project_dir: str, config_path: str, project_name: str) -> dict:
             continue
 
         # Apply resolution
-        actor = resolution.get("actor", "Unknown")
         resolved_value = resolution.get("resolved_value", "")
         resolution_text = resolution.get("resolution_text", "")
         now_str = datetime.now(IST).strftime("%Y-%m-%d")
 
+        # Look up Slack username and message permalink
+        display_name = fetch_user_display_name(bot_token, reply_user_id or "")
+        permalink = get_message_permalink(bot_token, channel_id, reply_ts or "")
+
         # Build the resolution string for the Conflict Resolution column
-        resolution_entry = f"[{now_str} {actor} via Slack]: {resolution_text}"
+        if permalink:
+            resolution_entry = f"[{now_str} @{display_name} via Slack ({permalink})]: {resolution_text}"
+        else:
+            resolution_entry = f"[{now_str} @{display_name} via Slack]: {resolution_text}"
 
         # Update the conflict in run_state
         conflict["resolved"] = True

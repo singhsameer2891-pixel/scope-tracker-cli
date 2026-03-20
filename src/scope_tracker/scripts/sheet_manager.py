@@ -905,6 +905,10 @@ def _diff_slack_item(item: dict, existing_row: dict, timestamp: str) -> dict[str
     if new_desc and new_desc != existing_row.get("Description", ""):
         changes["Description"] = new_desc
 
+    new_version = item.get("target_version", "")
+    if new_version and new_version != existing_row.get("Target Version", ""):
+        changes["Target Version"] = new_version
+
     if changes:
         changes["Last Updated"] = timestamp
 
