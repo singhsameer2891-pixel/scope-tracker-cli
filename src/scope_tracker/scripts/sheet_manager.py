@@ -775,8 +775,11 @@ def _check_conflict_for_item(
             return None  # Suppressed
 
     source_id = item.get("source_id", "")
+    feature_name = item.get("feature_name", "") or item.get("user_story", "") or row.get("User Story / Feature", "")
     return {
         "id": source_id,
+        "source_id": source_id,
+        "feature_name": feature_name,
         "source_a": source_type,
         "value_a": item_decision,
         "source_b": "Sheet",
