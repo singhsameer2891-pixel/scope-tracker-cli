@@ -1,5 +1,43 @@
 # Changelog
 
+## v1.1.0 — 2026-03-20
+
+Replaced LLM-as-middleman with direct API calls for Confluence, Slack, Google Sheets,
+PRD parsing, and report formatting. Added self-healing dependency management.
+
+### Breaking changes
+
+- None. All CLI commands and config format are backward-compatible.
+
+### New: Direct API clients
+
+- **Confluence**: `confluence_client.py` fetches page metadata, content, and comments via REST API (replaces `prd_fetch_meta.md` and `prd_fetch_content.md` LLM calls for Confluence sources)
+- **Slack**: `slack_client.py` fetches channel history and thread replies via Slack Web API (replaces `slack_fetch.md` LLM call)
+- **Google Sheets**: `google_sheets.py` creates, reads, updates, and formats sheets via Google Sheets API with OAuth2 (replaces LLM-based sheet operations)
+
+### New: Pure Python replacements
+
+- **PRD parser**: `prd_parser.py` extracts user stories from markdown tables deterministically (replaces `prd_extract.md` LLM call)
+- **Slack reporter**: `slack_reporter.py` builds and posts run summary reports via Slack API (replaces `slack_report.md` LLM call)
+
+### Remaining LLM usage
+
+Only 3 semantic tasks still use `claude -p`: `slack_classify.md`, `slack_match.md`, `conflict_resolve.md`.
+
+### Self-healing dependency management
+
+- `dependency_manager.py` auto-installs missing Python packages at startup
+- `doctor` command offers automatic fixes for resolvable issues
+- Google OAuth token refresh handled transparently
+- Missing `.mcp.json` keys produce clear error messages with fix instructions
+
+### Testing
+
+- Updated e2e tests to mock direct API clients instead of LLM calls
+- 189 tests passing across 15 test files
+
+---
+
 ## v1.0.0 — 2026-03-20
 
 Initial release.
