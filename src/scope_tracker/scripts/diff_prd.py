@@ -57,7 +57,7 @@ def _load_run_state(project_dir: str, project_name: str) -> dict:
         return {}
 
 
-def run(project_dir: str, config_path: str, project_name: str) -> dict:
+def run(project_dir: str, config_path: str, project_name: str, force: bool = False) -> dict:
     """Execute the PRD diff check.
 
     Args:
@@ -118,7 +118,7 @@ def run(project_dir: str, config_path: str, project_name: str) -> dict:
     run_state = _load_run_state(project_dir, project_name)
     stored_modified = run_state.get("prd", {}).get("last_modified", "")
 
-    if new_modified and new_modified == stored_modified:
+    if not force and new_modified and new_modified == stored_modified:
         print("PRD unchanged — skipping.", file=sys.stderr)
         return {"status": "skipped (unchanged)", "last_modified": stored_modified}
 
@@ -157,9 +157,10 @@ def main() -> None:
     parser.add_argument("--project-dir", required=True, help="Path to the project directory.")
     parser.add_argument("--config", required=True, help="Path to scope_tracker_config.json.")
     parser.add_argument("--project", required=True, help="Project name.")
+    parser.add_argument("--force", action="store_true", help="Force fetch even if mtime unchanged.")
     args = parser.parse_args()
 
-    result = run(args.project_dir, args.config, args.project)
+    result = run(args.project_dir, args.config, args.project, force=args.force)
     print(json.dumps(result, indent=2))
 
 
