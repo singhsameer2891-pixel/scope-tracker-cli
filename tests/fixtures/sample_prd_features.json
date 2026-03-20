@@ -1,0 +1,52 @@
+[
+  {
+    "source_id": "PRD:1",
+    "identifier": "1",
+    "feature_name": "User login with OAuth2",
+    "description": "Users can log in using Google or Microsoft OAuth2 providers.",
+    "source_text": "As a user, I want to log in using Google or Microsoft OAuth2 so that I don't need a separate password.",
+    "prd_comments": "",
+    "latest_comment_decision": "",
+    "skipped_rows": []
+  },
+  {
+    "source_id": "PRD:1.1",
+    "identifier": "1.1",
+    "feature_name": "Two-factor authentication",
+    "description": "Optional 2FA via authenticator app for enhanced security.",
+    "source_text": "As a user, I want to enable 2FA via an authenticator app so that my account is more secure.",
+    "prd_comments": "",
+    "latest_comment_decision": "",
+    "skipped_rows": []
+  },
+  {
+    "source_id": "PRD:2",
+    "identifier": "2",
+    "feature_name": "Real-time P&L display",
+    "description": "Users can see their live profit and loss in the portfolio view, updated every 30 seconds.",
+    "source_text": "As a user, I want to see my live P&L in the portfolio view updated every 30 seconds.",
+    "prd_comments": "[2026-03-10 Ashwini]: Descoped for V1. [2026-03-15 Sam]: Reinstate, confirmed V1.",
+    "latest_comment_decision": "In Scope",
+    "skipped_rows": []
+  },
+  {
+    "source_id": "PRD:2.1",
+    "identifier": "2.1",
+    "feature_name": "Chart switching between time periods",
+    "description": "Users can switch between 1D, 1W, 1M, 3M, 1Y, and ALL time periods on any chart.",
+    "source_text": "As a user, I want to switch chart time periods (1D, 1W, 1M, 3M, 1Y, ALL) so I can analyze trends.",
+    "prd_comments": "[2026-03-18 Sam]: Pushed to V2 per capacity review.",
+    "latest_comment_decision": "Pushed to V2",
+    "skipped_rows": []
+  },
+  {
+    "source_id": "PRD:3",
+    "identifier": "3",
+    "feature_name": "Export portfolio to CSV",
+    "description": "Users can export their current portfolio holdings as a CSV file.",
+    "source_text": "As a user, I want to export my portfolio holdings as CSV so that I can use them in Excel.",
+    "prd_comments": "",
+    "latest_comment_decision": "",
+    "skipped_rows": []
+  }
+]

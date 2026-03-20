@@ -1,0 +1,32 @@
+[
+  {
+    "source_id": "SLACK:1773901583.351119",
+    "thread_ts": "1773901583.351119",
+    "feature_name": "Real-time P&L display",
+    "description": "Team confirmed P&L display is back in scope for V1 after discussion with stakeholders.",
+    "scope_decision": "In Scope",
+    "target_version": "LIVE",
+    "confidence": "high",
+    "source_text": "Confirmed with stakeholders — P&L display is back in scope for V1 launch."
+  },
+  {
+    "source_id": "SLACK:1774012345.678901",
+    "thread_ts": "1774012345.678901",
+    "feature_name": "Dark mode support",
+    "description": "New feature request: dark mode toggle across the entire application.",
+    "scope_decision": "Fast Follower",
+    "target_version": "Next release",
+    "confidence": "high",
+    "source_text": "We should add dark mode support. Marking as fast follower for next release."
+  },
+  {
+    "source_id": "SLACK:1774098765.432100",
+    "thread_ts": "1774098765.432100",
+    "feature_name": "Chart switching between time periods",
+    "description": "Discussion about chart switching — team says it should stay in V1 contrary to PRD comment.",
+    "scope_decision": "In Scope",
+    "target_version": "LIVE",
+    "confidence": "medium",
+    "source_text": "Chart switching should stay in V1. We have capacity after the auth work was simplified."
+  }
+]

@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scope-tracker"
+version = "1.0.0"
+requires-python = ">=3.10"
+dependencies = [
+    "click>=8.0",
+    "rich>=13.0",
+    "openpyxl>=3.1",
+    "pymupdf>=1.23",
+    "requests>=2.31",
+    "google-api-python-client>=2.0",
+    "google-auth>=2.0",
+]
+
+[project.scripts]
+scope-tracker = "scope_tracker.cli:main"

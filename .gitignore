@@ -1,0 +1,11 @@
+.mcp.json
+*.xlsx
+outputs/
+system/
+__pycache__/
+*.pyc
+.env
+dist/
+*.egg-info/
+credentials.json
+.venv/

@@ -1,0 +1,59 @@
+# Scalper — Product Requirements Document
+
+## Overview
+
+Scalper is a trading platform that provides real-time portfolio management,
+charting, and trade execution capabilities for retail investors.
+
+This document defines the scope of the initial release (V1) and planned
+follow-up features.
+
+## Goals
+
+- Provide a fast, reliable trading experience
+- Support OAuth2 login for seamless onboarding
+- Deliver real-time P&L and charting
+- Enable CSV export for compliance and personal use
+
+## Non-Functional Requirements
+
+| Ref | Requirement |
+|-----|-------------|
+| NFR-1 | Page load time < 2 seconds |
+| NFR-2 | 99.9% uptime SLA |
+| NFR-3 | SOC 2 compliance |
+
+These are not user stories and should be ignored by the extractor.
+
+## User Stories
+
+| ID | User Story | Priority | Owner |
+|----|-----------|----------|-------|
+| 1 | As a user, I want to log in using Google or Microsoft OAuth2 so that I don't need a separate password. | High | Auth Team |
+| 1.1 | As a user, I want to enable two-factor authentication via an authenticator app so that my account is more secure. | Medium | Auth Team |
+| 1.2 | As a user, I want to reset my password via an email link so that I can recover access to my account. | Medium | Auth Team |
+| 2 | As a user, I want to see my live profit and loss in the portfolio view, updated every 30 seconds, so that I can make timely decisions. | High | Portfolio Team |
+| 2.1 | As a user, I want to switch between 1D, 1W, 1M, 3M, 1Y, and ALL time periods on any chart so that I can analyze trends over different horizons. | Medium | Charts Team |
+
+Note: rows without valid numeric identifiers should be ignored:
+
+| ID | User Story | Priority | Owner |
+|----|-----------|----------|-------|
+| US-001 | This row has a non-numeric identifier and should be skipped. | Low | — |
+| F1 | This row also has a non-numeric identifier. | Low | — |
+
+## Technical Architecture
+
+This section contains a table that should NOT be extracted as user stories.
+
+| Component | Technology | Notes |
+|-----------|-----------|-------|
+| Frontend | React 18 | SPA with TypeScript |
+| Backend | Go 1.21 | gRPC services |
+| Database | PostgreSQL 15 | With TimescaleDB extension |
+| Cache | Redis 7 | Session store + rate limiting |
+
+## Appendix
+
+Additional context and reference materials are available in the shared
+Google Drive folder linked in the project wiki.

@@ -1,0 +1,33 @@
+{
+  "_meta": {
+    "created": "2026-03-15T09:00:00+05:30",
+    "last_updated": "2026-03-18T15:00:00+05:30"
+  },
+  "run_count": 3,
+  "last_run_date": "2026-03-18",
+  "prd": {
+    "last_modified": "2026-03-17T10:23:00Z",
+    "last_read": "2026-03-18T09:00:00+05:30",
+    "feature_count": 12
+  },
+  "slack": {
+    "last_run_timestamp": "1773901583.351119",
+    "seen_thread_ids": ["1770359450.452919", "1772790030.028369"]
+  },
+  "conflicts": [
+    {
+      "id": "PRD:1.3",
+      "source_a": "PRD",
+      "value_a": "Pushed to V2",
+      "source_b": "Sheet",
+      "value_b": "In Scope",
+      "raised_at": "2026-03-18T09:00:00+05:30",
+      "slack_message_ts": "1773906163.221689",
+      "resolved": false
+    }
+  ],
+  "sheet": {
+    "last_row_number": 5,
+    "last_updated": "2026-03-18T15:00:00+05:30"
+  }
+}
