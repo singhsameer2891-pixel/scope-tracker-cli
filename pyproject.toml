@@ -18,3 +18,9 @@ dependencies = [
 
 [project.scripts]
 scope-tracker = "scope_tracker.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+scope_tracker = ["prompts/*", "scripts/*"]
