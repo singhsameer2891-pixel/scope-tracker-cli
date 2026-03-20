@@ -426,7 +426,30 @@ def run(
             bot_token = slack_creds["bot_token"]
             channel_id = resolve_channel_id(bot_token, reporting_channel)
 
-            post_report(bot_token, channel_id, report_text)
+            post_result = post_report(bot_token, channel_id, report_text)
+
+            # Save the posted message ts to pending conflicts so conflict_manager
+            # can check for replies on next run
+            message_ts = post_result.get("ts")
+            if message_ts and pending_conflicts:
+                for conflict in pending_conflicts:
+                    if not conflict.get("slack_message_ts"):
+                        conflict["slack_message_ts"] = message_ts
+                # Write updated conflicts back to run_state
+                run_state = _load_run_state(project_dir, project_name)
+                run_state["conflicts"] = [
+                    next((pc for pc in pending_conflicts if pc.get("id") == c.get("id")), c)
+                    if not c.get("resolved", False) else c
+                    for c in run_state.get("conflicts", [])
+                ]
+                state_path = os.path.join(
+                    project_dir, "system", f"{project_name}_run_state.json"
+                )
+                try:
+                    with open(state_path, "w", encoding="utf-8") as f:
+                        json.dump(run_state, f, indent=2, ensure_ascii=False)
+                except OSError as e2:
+                    _log(f"Warning: could not save slack_message_ts: {e2}", verbose)
         except RuntimeError as e:
             _log(f"Step 5 error: {e}", verbose)
     else:

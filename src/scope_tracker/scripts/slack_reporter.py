@@ -92,14 +92,13 @@ def build_report(
         lines.append(f"*\u26a1 Awaiting Your Input ({conflict_count})*")
 
         for i, conflict in enumerate(pending_conflicts, 1):
-            source_id = conflict.get("source_id", "?")
             feature_name = conflict.get("feature_name", "?")
             source_a = conflict.get("source_a", "PRD")
             value_a = conflict.get("value_a", "?")
             source_b = conflict.get("source_b", "Sheet")
             value_b = conflict.get("value_b", "?")
             lines.append(
-                f'{i}. Conflict \u2014 {source_id} "{feature_name}" \u2014 '
+                f'{i}. Conflict \u2014 "{feature_name}" \u2014 '
                 f'{source_a} says {value_a}, {source_b} says {value_b}. '
                 f'Reply "{source_a}" or "{source_b}".'
             )
