@@ -415,7 +415,7 @@ def run(
             report_text = build_report(
                 project_name=project_name,
                 run_datetime=run_datetime,
-                steps_executed=steps_executed,
+                steps_executed=steps_executed + 1,
                 run_summary=run_summary,
                 pending_conflicts=pending_conflicts,
             )
