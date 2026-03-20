@@ -274,8 +274,8 @@ clear, all MCP configs are written correctly, all folder structures are created.
 
 | # | Task | Status |
 |---|---|---|
-| 13.1 | Update `tests/test_e2e.py` — adjust for direct API calls (mock Google Sheets API, mock Confluence/Slack HTTP, mock `call_llm` only for the 3 semantic prompts). | PENDING |
-| 13.2 | Run full test suite: `pytest tests/ -v`. All tests pass. Fix any failures. | PENDING |
+| 13.1 | Update `tests/test_e2e.py` — adjust for direct API calls (mock Google Sheets API, mock Confluence/Slack HTTP, mock `call_llm` only for the 3 semantic prompts). | DONE |
+| 13.2 | Run full test suite: `pytest tests/ -v`. All tests pass. Fix any failures. | DONE |
 | 13.3 | Push to GitHub. Reinstall from git URL. Verify `scope-tracker --help` works. | PENDING |
 | 13.4 | Run `scope-tracker init-sheet --project basket-test-slack` end-to-end. Verify: (a) Confluence PRD fetched via direct API; (b) Google Sheet created with URL; (c) config updated with sheet_url. | PENDING |
 | 13.5 | Update `CHANGELOG.md` — v1.1.0 entry: "Replaced LLM-as-middleman with direct API calls for Confluence, Slack, Google Sheets, PRD parsing, and report formatting. Added self-healing dependency management." | PENDING |

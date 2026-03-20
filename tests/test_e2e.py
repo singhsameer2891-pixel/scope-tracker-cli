@@ -1,11 +1,13 @@
 """End-to-end integration tests for scope-tracker.
 
-Uses a mock claude binary (tests/fixtures/mock_claude.sh) and tmp_path
-to exercise the full CLI flow without real MCP or Google Sheets calls.
+Uses mocked direct API clients (Google Sheets, Slack, Confluence) and
+mock call_llm only for the 3 semantic LLM prompts (slack_classify,
+slack_match, conflict_resolve). Exercises the full CLI flow without
+real external service calls.
 
 Tests:
 (a) scope-tracker init with mocked input creates all expected files
-(b) scope-tracker run --dry-run with mock_claude produces steps_executed = 6
+(b) scope-tracker run --dry-run with mocked APIs produces steps_executed = 6
 (c) scope-tracker status outputs correct project name and last run date
 (d) scope-tracker doctor passes all checks in test environment
 """
@@ -91,7 +93,7 @@ def e2e_workspace(tmp_path, mock_claude_on_path):
     # Scaffold
     st_dir = scaffold_directories(work_dir)
 
-    # Build config with one project
+    # Build config with one project (Confluence source to exercise direct API path)
     config = build_default_config(
         reporting_channel="scope-tracker",
         timezone="Asia/Kolkata",
@@ -103,8 +105,8 @@ def e2e_workspace(tmp_path, mock_claude_on_path):
         "slack_channel": "demo-scope",
         "sheet_url": "https://docs.google.com/spreadsheets/d/test123/edit",
         "prd_source": {
-            "type": "google-drive",
-            "url": "https://docs.google.com/document/d/xyz789/edit",
+            "type": "confluence",
+            "url": "https://mycompany.atlassian.net/wiki/spaces/ENG/pages/12345/PRD",
             "last_modified": None,
         },
         "slack_last_run_timestamp": None,
@@ -117,7 +119,11 @@ def e2e_workspace(tmp_path, mock_claude_on_path):
     write_config(st_dir, config)
     write_mcp_config(st_dir, {
         "slack": {"SLACK_BOT_TOKEN": "xoxb-test-token", "SLACK_TEAM_ID": "T12345"},
-        "gdrive": {"GDRIVE_CREDENTIALS_FILE": "/tmp/test_creds.json"},
+        "confluence": {
+            "CONFLUENCE_URL": "https://mycompany.atlassian.net",
+            "CONFLUENCE_USERNAME": "user@example.com",
+            "CONFLUENCE_API_TOKEN": "test-token-123",
+        },
     })
     write_gitignore(st_dir)
 
@@ -174,10 +180,6 @@ class TestInitE2E:
 
         # If init ran in the CliRunner's isolated filesystem, check there
         if not os.path.isdir(st_dir):
-            # CliRunner uses current directory; init creates scope-tracker/ in cwd
-            # Let's check if it was created somewhere accessible
-            # The init command's scaffold_directories uses os.getcwd()
-            # We need to verify the output message instead
             assert result.exit_code == 0 or "scope-tracker initialized" in result.output or "Created scope-tracker" in result.output
             return
 
@@ -230,11 +232,11 @@ class TestInitE2E:
         assert len(config["projects"]) == 1
         assert config["projects"][0]["name"] == "demo"
 
-        # .mcp.json has slack and gdrive
+        # .mcp.json has slack and confluence
         with open(os.path.join(st_dir, ".mcp.json")) as f:
             mcp = json.load(f)
         assert "slack" in mcp["mcpServers"]
-        assert "gdrive" in mcp["mcpServers"]
+        assert "confluence" in mcp["mcpServers"]
 
 
 # ---------------------------------------------------------------------------
@@ -242,19 +244,17 @@ class TestInitE2E:
 # ---------------------------------------------------------------------------
 
 class TestRunDryRunE2E:
-    """Test that run --dry-run with mock_claude executes all steps."""
+    """Test that run --dry-run with mocked direct APIs executes all steps."""
 
     def test_dry_run_completes_with_6_steps(self, e2e_workspace):
-        """Pipeline dry-run executes 6 steps and writes steps_executed.json."""
-        runner = CliRunner()
+        """Pipeline dry-run executes 6 steps and writes steps_executed.json.
 
-        # We need to run the pipeline. The pipeline calls scripts as Python
-        # modules (not subprocesses for most steps), so we need to mock
-        # call_llm to use our mock_claude behavior instead of the real claude CLI.
-        # The mock_claude.sh handles file-writing logic that call_llm depends on.
-
-        # For the dry-run e2e test, we patch at the module level to avoid
-        # real claude CLI calls, while still exercising the pipeline logic.
+        Mocks:
+        - Confluence API (direct) for PRD fetching
+        - Slack API (direct) for message fetching
+        - Google Sheets API (direct) for sheet operations
+        - call_llm only for the 3 semantic prompts: slack_classify, slack_match, conflict_resolve
+        """
         from scope_tracker.scripts import run_pipeline
 
         st_dir = e2e_workspace["st_dir"]
@@ -275,61 +275,11 @@ class TestRunDryRunE2E:
         with open(os.path.join(system_dir, "demo_run_state.json"), "w") as f:
             json.dump(run_state, f)
 
-        # Mock call_llm to simulate claude responses by writing expected files
-        def mock_call_llm(prompt_file, placeholders, cwd, timeout=300):
+        # --- Mock call_llm only for the 3 semantic LLM prompts ---
+        def mock_call_llm(prompt_file, placeholders, cwd, timeout=300, expected_output_files=None):
             prompt_name = os.path.basename(prompt_file)
 
-            if "prd_fetch_meta" in prompt_name:
-                output_path = placeholders.get("OUTPUT_PATH", "")
-                if output_path:
-                    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-                    with open(output_path, "w") as f:
-                        json.dump({"modified_time": "2026-03-20T10:00:00Z"}, f)
-                return '{"modified_time": "2026-03-20T10:00:00Z"}'
-
-            elif "prd_fetch_content" in prompt_name:
-                content_path = placeholders.get("CONTENT_OUTPUT_PATH", "")
-                comments_path = placeholders.get("COMMENTS_OUTPUT_PATH", "")
-                if content_path:
-                    os.makedirs(os.path.dirname(content_path), exist_ok=True)
-                    with open(content_path, "w") as f:
-                        f.write("## User Stories\n| ID | Story |\n| 1 | Test story |")
-                if comments_path:
-                    os.makedirs(os.path.dirname(comments_path), exist_ok=True)
-                    with open(comments_path, "w") as f:
-                        json.dump([], f)
-                return "Content written."
-
-            elif "prd_extract" in prompt_name:
-                output_path = placeholders.get("OUTPUT_PATH", "")
-                features = [
-                    {
-                        "source_id": "PRD:1",
-                        "identifier": "1",
-                        "feature_name": "Test feature",
-                        "description": "A test feature.",
-                        "source_text": "As a user, I want a test feature.",
-                        "prd_comments": "",
-                        "latest_comment_decision": "",
-                        "skipped_rows": [],
-                    }
-                ]
-                if output_path:
-                    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-                    with open(output_path, "w") as f:
-                        json.dump(features, f)
-                return json.dumps(features)
-
-            elif "slack_fetch" in prompt_name:
-                output_path = placeholders.get("OUTPUT_PATH", "")
-                data = {"new_message_count": 0, "threads": []}
-                if output_path:
-                    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-                    with open(output_path, "w") as f:
-                        json.dump(data, f)
-                return json.dumps(data)
-
-            elif "slack_classify" in prompt_name:
+            if "slack_classify" in prompt_name:
                 output_path = placeholders.get("OUTPUT_PATH", "")
                 if output_path:
                     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -337,39 +287,89 @@ class TestRunDryRunE2E:
                         json.dump([], f)
                 return "[]"
 
-            elif "slack_report" in prompt_name:
-                return "Report posted (mock)."
-
-            elif "conflict_resolve" in prompt_name:
+            elif "slack_match" in prompt_name:
                 output_path = placeholders.get("OUTPUT_PATH", "")
+                result = {"match_found": False, "confidence": "low"}
                 if output_path:
                     os.makedirs(os.path.dirname(output_path), exist_ok=True)
                     with open(output_path, "w") as f:
-                        json.dump({"resolved": False}, f)
-                return '{"resolved": false}'
+                        json.dump(result, f)
+                return json.dumps(result)
 
-            return "{}"
+            elif "conflict_resolve" in prompt_name:
+                output_path = placeholders.get("OUTPUT_PATH", "")
+                result = {"resolved": False}
+                if output_path:
+                    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                    with open(output_path, "w") as f:
+                        json.dump(result, f)
+                return json.dumps(result)
 
-        # Run the pipeline directly with mock
-        # diff_slack and conflict_manager now use direct Slack API, not call_llm
+            # Shouldn't reach here for other prompts in the updated code
+            raise RuntimeError(f"Unexpected call_llm for prompt: {prompt_name}")
+
+        # --- Mock Confluence direct API (used by diff_prd) ---
+        mock_confluence_creds = {
+            "site_name": "mycompany",
+            "email": "user@example.com",
+            "api_token": "test-token-123",
+        }
+
+        def mock_fetch_page_metadata(site_name, email, token, page_id):
+            return {"modified_time": "2026-03-20T10:00:00Z", "title": "Demo PRD"}
+
+        def mock_fetch_page_content(site_name, email, token, page_id):
+            return (
+                "# Product Requirements\n\n"
+                "## User Stories\n\n"
+                "| ID | User Story | Priority |\n"
+                "|----|-----------|----------|\n"
+                "| 1 | As a user, I want to log in | High |\n"
+                "| 1.1 | As a user, I want to reset my password | Medium |\n"
+                "| 2 | As an admin, I want to manage users | High |\n"
+            )
+
+        def mock_fetch_page_comments(site_name, email, token, page_id):
+            return [
+                {
+                    "anchor_text": "log in",
+                    "author": "PM",
+                    "date": "2026-03-19",
+                    "comment_text": "Confirmed in scope",
+                }
+            ]
+
+        # --- Mock Slack direct API (used by diff_slack) ---
+        mock_slack_creds = {"bot_token": "xoxb-test-token"}
+
+        # --- Mock Google Sheets API (used by sheet_manager) ---
+        mock_sheets_service = MagicMock()
+
+        # Apply all mocks
         with patch("scope_tracker.scripts.call_llm.call_llm", side_effect=mock_call_llm), \
-             patch("scope_tracker.scripts.diff_prd.call_llm", side_effect=mock_call_llm), \
-             patch("scope_tracker.scripts.diff_slack.load_slack_credentials", return_value={"bot_token": "xoxb-test"}), \
+             patch("scope_tracker.scripts.run_pipeline.call_llm", side_effect=mock_call_llm), \
+             patch("scope_tracker.scripts.conflict_manager.call_llm", side_effect=mock_call_llm), \
+             patch("scope_tracker.scripts.sheet_manager.call_llm", side_effect=mock_call_llm), \
+             patch("scope_tracker.scripts.diff_prd.load_confluence_credentials", return_value=mock_confluence_creds), \
+             patch("scope_tracker.scripts.diff_prd.get_page_id_from_url", return_value="12345"), \
+             patch("scope_tracker.scripts.diff_prd.fetch_page_metadata", side_effect=mock_fetch_page_metadata), \
+             patch("scope_tracker.scripts.diff_prd.fetch_page_content", side_effect=mock_fetch_page_content), \
+             patch("scope_tracker.scripts.diff_prd.fetch_page_comments", side_effect=mock_fetch_page_comments), \
+             patch("scope_tracker.scripts.diff_slack.load_slack_credentials", return_value=mock_slack_creds), \
              patch("scope_tracker.scripts.diff_slack.resolve_channel_id", return_value="C123"), \
              patch("scope_tracker.scripts.diff_slack.fetch_channel_history", return_value=[]), \
-             patch("scope_tracker.scripts.conflict_manager.load_slack_credentials", return_value={"bot_token": "xoxb-test"}), \
+             patch("scope_tracker.scripts.diff_slack.fetch_thread_replies", return_value=[]), \
+             patch("scope_tracker.scripts.conflict_manager.load_slack_credentials", return_value=mock_slack_creds), \
              patch("scope_tracker.scripts.conflict_manager.resolve_channel_id", return_value="C123"), \
              patch("scope_tracker.scripts.conflict_manager.fetch_thread_replies", return_value=[]), \
-             patch("scope_tracker.scripts.conflict_manager.call_llm", side_effect=mock_call_llm), \
-             patch("scope_tracker.scripts.run_pipeline.call_llm", side_effect=mock_call_llm), \
-             patch("scope_tracker.scripts.run_pipeline.sheet_manager") as mock_sheet:
+             patch("scope_tracker.scripts.sheet_manager.authenticate", return_value=mock_sheets_service), \
+             patch("scope_tracker.scripts.sheet_manager.gs_read_spreadsheet", return_value=[]), \
+             patch("scope_tracker.scripts.sheet_manager.gs_update_spreadsheet", return_value=None), \
+             patch("scope_tracker.scripts.sheet_manager.gs_create_spreadsheet") as mock_gs_create:
 
-            mock_sheet.load_config.return_value = ({}, {})
-            mock_sheet.update_sheet.return_value = {
-                "status": "updated",
-                "rows_added": 0,
-                "rows_updated": 0,
-                "conflicts_detected": 0,
+            mock_gs_create.return_value = {
+                "spreadsheet_id": "test_sheet_123",
+                "sheet_url": "https://docs.google.com/spreadsheets/d/test_sheet_123/edit",
             }
 
             result = run_pipeline.run(
@@ -402,6 +402,121 @@ class TestRunDryRunE2E:
         assert "3" in step_ids
         assert "4" in step_ids
         assert "5" in step_ids
+
+    def test_dry_run_prd_extraction_uses_pure_python(self, e2e_workspace):
+        """Verify PRD extraction uses prd_parser (pure Python), not call_llm.
+
+        After Groups 10-11, PRD fetching uses direct Confluence API and
+        PRD extraction uses the deterministic prd_parser module.
+        """
+        from scope_tracker.scripts import run_pipeline
+
+        st_dir = e2e_workspace["st_dir"]
+        config_path = e2e_workspace["config_path"]
+        project_dir = e2e_workspace["project_dir"]
+        system_dir = e2e_workspace["system_dir"]
+
+        # Create initial run_state
+        run_state = {
+            "_meta": {"created": "2026-03-19T09:00:00+05:30"},
+            "run_count": 0,
+            "last_run_date": None,
+            "prd": {"last_modified": None},
+            "slack": {"last_run_timestamp": "0", "seen_thread_ids": []},
+            "conflicts": [],
+            "sheet": {"last_row_number": 0},
+        }
+        with open(os.path.join(system_dir, "demo_run_state.json"), "w") as f:
+            json.dump(run_state, f)
+
+        # Track call_llm calls to verify only semantic prompts are called
+        llm_calls = []
+
+        def tracking_call_llm(prompt_file, placeholders, cwd, timeout=300, expected_output_files=None):
+            prompt_name = os.path.basename(prompt_file)
+            llm_calls.append(prompt_name)
+
+            if "slack_classify" in prompt_name:
+                output_path = placeholders.get("OUTPUT_PATH", "")
+                if output_path:
+                    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                    with open(output_path, "w") as f:
+                        json.dump([], f)
+                return "[]"
+            elif "slack_match" in prompt_name:
+                output_path = placeholders.get("OUTPUT_PATH", "")
+                if output_path:
+                    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                    with open(output_path, "w") as f:
+                        json.dump({"match_found": False}, f)
+                return '{"match_found": false}'
+            elif "conflict_resolve" in prompt_name:
+                output_path = placeholders.get("OUTPUT_PATH", "")
+                if output_path:
+                    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                    with open(output_path, "w") as f:
+                        json.dump({"resolved": False}, f)
+                return '{"resolved": false}'
+
+            raise RuntimeError(f"Unexpected LLM call for: {prompt_name}")
+
+        mock_confluence_creds = {
+            "site_name": "mycompany",
+            "email": "user@example.com",
+            "api_token": "test-token-123",
+        }
+
+        mock_sheets_service = MagicMock()
+
+        with patch("scope_tracker.scripts.call_llm.call_llm", side_effect=tracking_call_llm), \
+             patch("scope_tracker.scripts.run_pipeline.call_llm", side_effect=tracking_call_llm), \
+             patch("scope_tracker.scripts.conflict_manager.call_llm", side_effect=tracking_call_llm), \
+             patch("scope_tracker.scripts.sheet_manager.call_llm", side_effect=tracking_call_llm), \
+             patch("scope_tracker.scripts.diff_prd.load_confluence_credentials", return_value=mock_confluence_creds), \
+             patch("scope_tracker.scripts.diff_prd.get_page_id_from_url", return_value="12345"), \
+             patch("scope_tracker.scripts.diff_prd.fetch_page_metadata", return_value={"modified_time": "2026-03-20T10:00:00Z"}), \
+             patch("scope_tracker.scripts.diff_prd.fetch_page_content", return_value="## User Stories\n| ID | Story |\n|---|---|\n| 1 | Test feature |"), \
+             patch("scope_tracker.scripts.diff_prd.fetch_page_comments", return_value=[]), \
+             patch("scope_tracker.scripts.diff_slack.load_slack_credentials", return_value={"bot_token": "xoxb-test"}), \
+             patch("scope_tracker.scripts.diff_slack.resolve_channel_id", return_value="C123"), \
+             patch("scope_tracker.scripts.diff_slack.fetch_channel_history", return_value=[]), \
+             patch("scope_tracker.scripts.diff_slack.fetch_thread_replies", return_value=[]), \
+             patch("scope_tracker.scripts.conflict_manager.load_slack_credentials", return_value={"bot_token": "xoxb-test"}), \
+             patch("scope_tracker.scripts.conflict_manager.resolve_channel_id", return_value="C123"), \
+             patch("scope_tracker.scripts.conflict_manager.fetch_thread_replies", return_value=[]), \
+             patch("scope_tracker.scripts.sheet_manager.authenticate", return_value=mock_sheets_service), \
+             patch("scope_tracker.scripts.sheet_manager.gs_read_spreadsheet", return_value=[]), \
+             patch("scope_tracker.scripts.sheet_manager.gs_update_spreadsheet", return_value=None):
+
+            result = run_pipeline.run(
+                project_dir=project_dir,
+                config_path=config_path,
+                project_name="demo",
+                dry_run=True,
+                verbose=True,
+            )
+
+        assert result["status"] == "completed"
+        # PRD extraction should NOT appear in LLM calls
+        assert "prd_extract.md" not in llm_calls, (
+            "prd_extract.md should not be called via LLM — pure Python prd_parser should be used"
+        )
+        assert "prd_fetch_meta.md" not in llm_calls, (
+            "prd_fetch_meta.md should not be called — direct Confluence API should be used"
+        )
+        assert "prd_fetch_content.md" not in llm_calls, (
+            "prd_fetch_content.md should not be called — direct Confluence API should be used"
+        )
+        assert "slack_fetch.md" not in llm_calls, (
+            "slack_fetch.md should not be called — direct Slack API should be used"
+        )
+        assert "slack_report.md" not in llm_calls, (
+            "slack_report.md should not be called — pure Python slack_reporter should be used"
+        )
+
+        # Verify PRD features were extracted (by prd_parser)
+        assert result["summary"]["prd_status"] == "updated"
+        assert result["summary"]["prd_feature_count"] >= 1
 
 
 # ---------------------------------------------------------------------------
