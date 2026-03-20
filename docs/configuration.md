@@ -122,10 +122,10 @@ Create credentials at [console.cloud.google.com](https://console.cloud.google.co
 | Field | Value |
 |---|---|
 | `command` | `"npx"` |
-| `args` | `["-y", "@modelcontextprotocol/server-confluence"]` |
-| `env.CONFLUENCE_URL` | Your Confluence base URL (e.g. `https://yourteam.atlassian.net/wiki`) |
-| `env.CONFLUENCE_USERNAME` | Your Confluence username (email) |
-| `env.CONFLUENCE_API_TOKEN` | Your Confluence API token |
+| `args` | `["-y", "@aashari/mcp-server-atlassian-confluence"]` |
+| `env.ATLASSIAN_SITE_NAME` | Your Atlassian site name (e.g. `yourteam` from `yourteam.atlassian.net`) |
+| `env.ATLASSIAN_USER_EMAIL` | Your Atlassian user email |
+| `env.ATLASSIAN_API_TOKEN` | Your Atlassian API token |
 
 Create an API token at [id.atlassian.com](https://id.atlassian.com) → Security → API tokens.
 

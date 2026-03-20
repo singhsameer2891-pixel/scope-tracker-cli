@@ -270,36 +270,36 @@ def run_gdrive_mcp_wizard() -> dict[str, str]:
 def run_confluence_mcp_wizard() -> dict[str, str]:
     """Prompt user for Confluence MCP credentials.
 
-    Collects Confluence base URL, username, and API token.
-    Validates URL starts with https://.
+    Collects Atlassian site name, user email, and API token.
+    Uses @aashari/mcp-server-atlassian-confluence package.
 
     Returns:
-        Dict with 'CONFLUENCE_URL', 'CONFLUENCE_USERNAME', 'CONFLUENCE_API_TOKEN' keys.
+        Dict with 'ATLASSIAN_SITE_NAME', 'ATLASSIAN_USER_EMAIL', 'ATLASSIAN_API_TOKEN' keys.
     """
     console.print(Panel(
         "[bold]Confluence MCP Configuration[/bold]\n\n"
-        "You need your Confluence base URL, username (email), and an API token.\n"
+        "You need your Atlassian site name, email, and an API token.\n"
         "Create an API token at: [link]https://id.atlassian.com[/link]\n"
         "Go to Security → API tokens → Create API token.",
         title="Confluence Setup",
     ))
 
     while True:
-        url = click.prompt(
-            "Confluence base URL (e.g. https://yourteam.atlassian.net/wiki)",
+        site_name = click.prompt(
+            "Atlassian site name (e.g. 'yourteam' from yourteam.atlassian.net)",
             type=str,
         ).strip()
-        if url.startswith("https://"):
+        if site_name and "." not in site_name and "/" not in site_name:
             break
-        console.print("[red]URL must start with 'https://'. Please try again.[/red]")
+        console.print("[red]Enter just the site name (e.g. 'yourteam'), not the full URL.[/red]")
 
-    username = click.prompt("Confluence username (email)", type=str).strip()
-    api_token = click.prompt("Confluence API token", type=str).strip()
+    email = click.prompt("Atlassian user email", type=str).strip()
+    api_token = click.prompt("Atlassian API token", type=str).strip()
 
     return {
-        "CONFLUENCE_URL": url,
-        "CONFLUENCE_USERNAME": username,
-        "CONFLUENCE_API_TOKEN": api_token,
+        "ATLASSIAN_SITE_NAME": site_name,
+        "ATLASSIAN_USER_EMAIL": email,
+        "ATLASSIAN_API_TOKEN": api_token,
     }
 
 
@@ -345,7 +345,7 @@ def write_mcp_config(base_path: str, mcp_config: dict[str, Any]) -> str:
     if "confluence" in mcp_config:
         servers["confluence"] = {
             "command": "npx",
-            "args": ["-y", "@modelcontextprotocol/server-confluence"],
+            "args": ["-y", "@aashari/mcp-server-atlassian-confluence"],
             "env": mcp_config["confluence"],
         }
 

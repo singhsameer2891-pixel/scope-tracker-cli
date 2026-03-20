@@ -158,7 +158,7 @@ def add() -> None:
             elif server_name == "confluence":
                 mcp_data["mcpServers"]["confluence"] = {
                     "command": "npx",
-                    "args": ["-y", "@modelcontextprotocol/server-confluence"],
+                    "args": ["-y", "@aashari/mcp-server-atlassian-confluence"],
                     "env": creds,
                 }
 

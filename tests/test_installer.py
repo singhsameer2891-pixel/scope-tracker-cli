@@ -184,9 +184,9 @@ class TestWriteMcpConfig:
         mcp_config = {
             "slack": {"SLACK_BOT_TOKEN": "xoxb-test", "SLACK_TEAM_ID": "T123"},
             "confluence": {
-                "CONFLUENCE_URL": "https://team.atlassian.net/wiki",
-                "CONFLUENCE_USERNAME": "user@example.com",
-                "CONFLUENCE_API_TOKEN": "tok-123",
+                "ATLASSIAN_SITE_NAME": "team",
+                "ATLASSIAN_USER_EMAIL": "user@example.com",
+                "ATLASSIAN_API_TOKEN": "tok-123",
             },
         }
         path = write_mcp_config(base, mcp_config)
@@ -329,9 +329,9 @@ class TestProjectWizard:
             "https://team.atlassian.net/wiki/spaces/PROJ/pages/123",
         ]
         mock_conf.return_value = {
-            "CONFLUENCE_URL": "https://team.atlassian.net/wiki",
-            "CONFLUENCE_USERNAME": "user@example.com",
-            "CONFLUENCE_API_TOKEN": "tok",
+            "ATLASSIAN_SITE_NAME": "team",
+            "ATLASSIAN_USER_EMAIL": "user@example.com",
+            "ATLASSIAN_API_TOKEN": "tok",
         }
 
         project_config, new_mcp = run_project_wizard(["slack"])
