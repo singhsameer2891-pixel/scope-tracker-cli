@@ -8,8 +8,4 @@ __pycache__/
 dist/
 *.egg-info/
 credentials.json
-token.json
 .venv/
-.DS_Store
-client_secret_*.json
-build/

@@ -1,0 +1,65 @@
+{
+  "global_settings": {
+    "reporting_slack_channel": "scope-tracker",
+    "reporting_slack_last_read": null,
+    "default_timezone": "Asia/Kolkata"
+  },
+  "sheet_config": {
+    "uat_rounds": 5,
+    "status_options": [
+      "To be tested",
+      "Passed",
+      "Passed with iteration",
+      "Failed",
+      "Blocked"
+    ],
+    "version_options": [
+      "LIVE",
+      "Next release",
+      "Parked",
+      "Fast follower"
+    ],
+    "scope_decision_options": [
+      "In Scope",
+      "Fast Follower",
+      "Pushed to V2",
+      "Parked",
+      "Active Blocker",
+      "Conflicting Signal"
+    ],
+    "blocker_options": [
+      "Yes",
+      "No"
+    ],
+    "prd_identifier_column_names": [
+      "ID",
+      "Identifier",
+      "#",
+      "Ref"
+    ],
+    "prd_story_column_names": [
+      "User Story",
+      "Story",
+      "Feature",
+      "Requirement",
+      "Description"
+    ]
+  },
+  "projects": [
+    {
+      "name": "testproject",
+      "enabled": true,
+      "folder": "testproject",
+      "slack_channel": "test-scope",
+      "sheet_url": "",
+      "prd_source": {
+        "type": "none",
+        "url": "",
+        "last_modified": null
+      },
+      "slack_last_run_timestamp": null,
+      "run_count": 0,
+      "last_run_date": null
+    }
+  ]
+}
